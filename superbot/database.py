@@ -155,6 +155,15 @@ async def init_db():
             await db.execute("ALTER TABLE orders ADD COLUMN pickup_code TEXT")
             await db.commit()
 
+        # Миграция: добавляем image_path для поддержки статических изображений
+        cursor = await db.execute("PRAGMA table_info(products)")
+        columns = await cursor.fetchall()
+        column_names = [col[1] for col in columns]
+
+        if 'image_path' not in column_names:
+            await db.execute("ALTER TABLE products ADD COLUMN image_path TEXT")
+            await db.commit()
+
         # Обновляем статус по умолчанию на pending для новых заказов
         # Старые заказы со статусом completed останутся как есть
 

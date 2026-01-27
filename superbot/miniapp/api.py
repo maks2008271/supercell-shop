@@ -531,8 +531,8 @@ async def search_products(q: str, game: str = None):
                     "price": p[3],
                     "game": p[4],
                     "subcategory": p[5],
-                    "image_file_id": p[8] if len(p) > 8 else None,
-                    "image_path": p[9] if len(p) > 9 else None,
+                    "image_file_id": p[7] if len(p) > 7 else None,
+                    "image_path": p[8] if len(p) > 8 else None,
                     "score": score
                 })
 
@@ -578,7 +578,7 @@ async def get_products(game: str = None, subcategory: str = None):
                 "subcategory": p[5],
                 "in_stock": p[6],
                 "image_file_id": p[7] if len(p) > 7 else None,
-                "image_path": p[8] if len(p) > 8 else None
+                "image_path": p[8] if len(p) > 8 else None,
             }
             for p in products
         ]
@@ -609,7 +609,8 @@ async def get_product(product_id: int):
         "game": product[4],
         "subcategory": product[5],
         "in_stock": product[6],
-        "image_file_id": product[7] if len(product) > 7 else None
+        "image_file_id": product[7] if len(product) > 7 else None,
+        "image_path": product[8] if len(product) > 8 else None
     }
 
 
