@@ -175,24 +175,37 @@ body {
 
 /* ===== ПРИВЕТСТВЕННЫЙ БАННЕР ===== */
 .welcome-banner {
+    position: relative;
     margin-bottom: 24px;
-    border-radius: 20px;
+    border-radius: 18px;
     overflow: hidden;
-    background: linear-gradient(135deg, rgba(59, 130, 246, 0.15), rgba(139, 92, 246, 0.15));
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    padding: 28px 20px;
+    background: linear-gradient(135deg, rgba(255,255,255,0.1), rgba(255,255,255,0.05));
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+    padding: 24px 20px;
+    animation: fadeInUp 0.5s ease backwards;
+}
+
+.welcome-banner::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, rgba(59,130,246,0.08), rgba(139,92,246,0.08));
+    z-index: 0;
 }
 
 .welcome-content {
+    position: relative;
+    z-index: 1;
     text-align: center;
 }
 
 .welcome-title {
-    font-size: 28px;
+    font-size: 24px;
     font-weight: 800;
-    margin-bottom: 12px;
+    margin-bottom: 10px;
     background: linear-gradient(135deg, #fff, #e0e7ff);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
@@ -201,15 +214,15 @@ body {
 }
 
 .welcome-subtitle {
-    font-size: 18px;
+    font-size: 16px;
     font-weight: 700;
     color: #ffffff;
-    margin-bottom: 10px;
+    margin-bottom: 8px;
 }
 
 .welcome-text {
     color: var(--text-secondary);
-    font-size: 14px;
+    font-size: 13px;
     line-height: 1.6;
     max-width: 600px;
     margin: 0 auto;
