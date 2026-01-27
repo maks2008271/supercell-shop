@@ -20,15 +20,17 @@ async def buy_product(callback: CallbackQuery):
         await callback.answer("Товар не найден", show_alert=True)
         return
 
-    # product: (id, name, description, price, game, subcategory, in_stock, created_at, image_file_id)
+    # product: (id, name, description, price, game, subcategory, in_stock, image_file_id, created_at)
     description = product[2]  # Текст товара
     price = product[3]
-    image_file_id = product[8] if len(product) > 8 else None
+    game = product[4]
+    subcategory = product[5]
+    image_file_id = product[7] if len(product) > 7 else None
 
     # Показываем информацию о товаре
     keyboard = [
         [InlineKeyboardButton(text="💳 Купить", callback_data=f"confirm_buy_{product_id}")],
-        [InlineKeyboardButton(text="Назад", callback_data="shop")]
+        [InlineKeyboardButton(text="Назад", callback_data=f"{game}_{subcategory}")]
     ]
 
     # Описание + цена (без .00)

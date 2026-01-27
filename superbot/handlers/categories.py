@@ -128,6 +128,23 @@ async def show_category_products(callback: CallbackQuery, game: str, subcategory
         else:
             caption += "Товары скоро появятся!"
 
+        # Пытаемся вернуть изображение игры
+        image_filename = GAME_IMAGES.get(game)
+        if image_filename:
+            image_path = BASE_DIR / image_filename
+            if image_path.exists():
+                try:
+                    photo = FSInputFile(str(image_path))
+                    await callback.message.edit_media(
+                        media=InputMediaPhoto(media=photo, caption=caption),
+                        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
+                    )
+                    await callback.answer()
+                    return
+                except Exception as e:
+                    print(f"Failed to edit media in show_category_products: {e}")
+
+        # Если не удалось поменять изображение, просто меняем caption/text
         try:
             await callback.message.edit_caption(
                 caption=caption,
