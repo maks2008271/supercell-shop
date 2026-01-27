@@ -1,0 +1,29 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+
+# База данных
+*.db
+*.db-shm
+*.db-wal
+
+# Конфигурация (ВАЖНО!)
+.env
+
+# Системные файлы
+.DS_Store
+*.log
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Временные файлы
+/tmp/
+*.tmp

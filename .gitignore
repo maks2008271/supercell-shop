@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtualenv
+venv/
+.env
+
+# DB
+*.db
+*.db-shm
+*.db-wal
+
+# OS
+.DS_Store
+
+# Backups
+miniapp_backup*
+

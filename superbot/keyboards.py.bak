@@ -1,0 +1,54 @@
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
+import os
+from config import REVIEWS_CHANNEL
+
+# URL Mini App из переменной окружения или ngrok
+MINIAPP_URL = os.getenv("WEBHOOK_BASE_URL", "https://YOUR-DOMAIN.ru")
+
+
+def get_main_menu() -> InlineKeyboardMarkup:
+    """Главное меню бота"""
+    keyboard = [
+        [InlineKeyboardButton(text="Магазин", web_app=WebAppInfo(url=MINIAPP_URL))],
+        [
+            InlineKeyboardButton(text="Профиль", callback_data="profile"),
+            InlineKeyboardButton(text="Поддержка", callback_data="support")
+        ],
+        [
+            InlineKeyboardButton(text="Отзывы", url=REVIEWS_CHANNEL),
+            InlineKeyboardButton(text="Новости", callback_data="news")
+        ],
+        [InlineKeyboardButton(text="Товары", callback_data="shop")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def get_back_to_menu() -> InlineKeyboardMarkup:
+    """Кнопка возврата в главное меню"""
+    keyboard = [
+        [InlineKeyboardButton(text="Назад", callback_data="main_menu")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def get_product_categories() -> InlineKeyboardMarkup:
+    """Категории товаров"""
+    keyboard = [
+        [
+            InlineKeyboardButton(text="Brawl Stars", callback_data="category_brawlstars"),
+            InlineKeyboardButton(text="Clash Royale", callback_data="category_clashroyale")
+        ],
+        [
+            InlineKeyboardButton(text="Clash of Clans", callback_data="category_clashofclans")
+        ],
+        [InlineKeyboardButton(text="Назад", callback_data="main_menu")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def get_profile_menu() -> InlineKeyboardMarkup:
+    """Меню профиля"""
+    keyboard = [
+        [InlineKeyboardButton(text="Назад", callback_data="main_menu")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)

@@ -1,0 +1,20 @@
+[Unit]
+Description=Supercell Shop Telegram Bot
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/supercell-shop
+Environment=PATH=/var/www/supercell-shop/venv/bin
+ExecStart=/var/www/supercell-shop/venv/bin/python bot.py
+Restart=always
+RestartSec=10
+
+# Логирование
+StandardOutput=append:/var/log/supercell-shop/bot.log
+StandardError=append:/var/log/supercell-shop/bot-error.log
+
+[Install]
+WantedBy=multi-user.target
