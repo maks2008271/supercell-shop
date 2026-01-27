@@ -1007,7 +1007,7 @@ function displayCategoryProducts(products) {
 
         const description = product.description || 'Нет описания';
         return `
-            <div class="product-card ripple" style="animation-delay: ${index * 0.05}s">
+            <div class="product-card ripple" data-game="${currentGame}" style="animation-delay: ${index * 0.05}s">
                 <div class="product-image">
                     ${imageHtml}
                     <span class="product-price-badge">${formatPrice(product.price)}₽</span>
@@ -1099,7 +1099,7 @@ function displayProducts(products, gridElement, countElement) {
         const badge = product.subcategory === 'akcii' ? '<span class="product-badge">Sale</span>' : '';
 
         return `
-            <div class="product-card ripple" onclick="handleProductClick(${index})" style="animation-delay: ${index * 0.05}s">
+            <div class="product-card ripple" data-game="${currentGame}" onclick="handleProductClick(${index})" style="animation-delay: ${index * 0.05}s">
                 <div class="product-image">
                     ${imageHtml}
                     <span class="product-price-badge">${formatPrice(product.price)}₽</span>
