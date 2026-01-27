@@ -872,16 +872,7 @@ body {
 }
 
 .product-price-badge {
-    position: absolute;
-    top: 8px;
-    right: 8px;
-    background: rgba(0, 0, 0, 0.6);
-    backdrop-filter: blur(8px);
-    padding: 5px 8px;
-    border-radius: 6px;
-    font-size: 12px;
-    font-weight: 600;
-    color: #10b981;
+    display: none;
 }
 
 .product-badge {
@@ -944,7 +935,7 @@ body {
 .product-price {
     font-size: 15px;
     font-weight: 700;
-    color: #10b981;
+    color: #ffffff;
 }
 
 .product-price-currency {

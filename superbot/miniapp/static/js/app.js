@@ -1023,7 +1023,7 @@ function displayCategoryProducts(products) {
                     <p>${description}</p>
                 </div>
                 <div class="product-footer">
-                    <span class="product-price">${formatPrice(product.price)}<span class="product-price-currency">₽</span></span>
+                    <span class="product-price">${formatPrice(product.price)} <span class="product-price-currency">₽</span></span>
                     <button class="product-buy-btn" onclick="event.stopPropagation(); buyProduct(${product.id})">Купить</button>
                 </div>
             </div>
@@ -1113,7 +1113,7 @@ function displayProducts(products, gridElement, countElement) {
                     </svg>
                 </div>
                 <div class="product-footer">
-                    <span class="product-price">${formatPrice(product.price)}<span class="product-price-currency">₽</span></span>
+                    <span class="product-price">${formatPrice(product.price)} <span class="product-price-currency">₽</span></span>
                     <button class="product-buy-btn" onclick="event.stopPropagation(); buyProduct(${product.id})">Купить</button>
                 </div>
             </div>
