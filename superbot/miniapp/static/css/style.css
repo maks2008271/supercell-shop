@@ -173,7 +173,49 @@ body {
     margin: 0 auto;
 }
 
-/* ===== БАННЕР СЛАЙДЕР ===== */
+/* ===== ПРИВЕТСТВЕННЫЙ БАННЕР ===== */
+.welcome-banner {
+    margin-bottom: 24px;
+    border-radius: 20px;
+    overflow: hidden;
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.15), rgba(139, 92, 246, 0.15));
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    padding: 28px 20px;
+}
+
+.welcome-content {
+    text-align: center;
+}
+
+.welcome-title {
+    font-size: 28px;
+    font-weight: 800;
+    margin-bottom: 12px;
+    background: linear-gradient(135deg, #fff, #e0e7ff);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    letter-spacing: -0.5px;
+}
+
+.welcome-subtitle {
+    font-size: 18px;
+    font-weight: 700;
+    color: #ffffff;
+    margin-bottom: 10px;
+}
+
+.welcome-text {
+    color: var(--text-secondary);
+    font-size: 14px;
+    line-height: 1.6;
+    max-width: 600px;
+    margin: 0 auto;
+}
+
+/* ===== БАННЕР СЛАЙДЕР (старые стили для возможного возврата) ===== */
 .banner-slider {
     position: relative;
     margin-bottom: 24px;
