@@ -7,6 +7,7 @@ router = Router()
 
 # Путь к папке с изображениями
 BASE_DIR = Path(__file__).parent.parent
+CATEGORY_IMAGES_DIR = BASE_DIR / "miniapp" / "static" / "images" / "categories"
 
 # Изображения для каждой игры
 GAME_IMAGES = {
@@ -128,21 +129,31 @@ async def show_category_products(callback: CallbackQuery, game: str, subcategory
         else:
             caption += "Товары скоро появятся!"
 
-        # Пытаемся вернуть изображение игры
-        image_filename = GAME_IMAGES.get(game)
-        if image_filename:
-            image_path = BASE_DIR / image_filename
-            if image_path.exists():
-                try:
-                    photo = FSInputFile(str(image_path))
-                    await callback.message.edit_media(
-                        media=InputMediaPhoto(media=photo, caption=caption),
-                        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
-                    )
-                    await callback.answer()
-                    return
-                except Exception as e:
-                    print(f"Failed to edit media in show_category_products: {e}")
+        # Пытаемся найти изображение для категории
+        category_image_path = CATEGORY_IMAGES_DIR / game / f"{subcategory}.png"
+
+        if category_image_path.exists():
+            # Используем изображение категории
+            image_path = category_image_path
+        else:
+            # Используем общее изображение игры
+            image_filename = GAME_IMAGES.get(game)
+            if image_filename:
+                image_path = BASE_DIR / image_filename
+            else:
+                image_path = None
+
+        if image_path and image_path.exists():
+            try:
+                photo = FSInputFile(str(image_path))
+                await callback.message.edit_media(
+                    media=InputMediaPhoto(media=photo, caption=caption),
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
+                )
+                await callback.answer()
+                return
+            except Exception as e:
+                print(f"Failed to edit media in show_category_products: {e}")
 
         # Если не удалось поменять изображение, просто меняем caption/text
         try:
