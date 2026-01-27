@@ -25,8 +25,6 @@ CATEGORIES = {
         "categories": [
             {"id": "akcii", "name": "Акции", "emoji": "🔥"},
             {"id": "gems", "name": "Гемы", "emoji": "💎"},
-            {"id": "brawlers", "name": "Бравлеры", "emoji": "🦸"},
-            {"id": "skiny", "name": "Скины", "emoji": "🎨"},
         ]
     },
     "clashroyale": {
