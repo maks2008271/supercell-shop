@@ -6,7 +6,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart
-from aiogram.types import Message, CallbackQuery, FSInputFile
+from aiogram.types import Message, CallbackQuery, FSInputFile, InputMediaPhoto
 from aiogram.fsm.storage.memory import MemoryStorage
 from config import BOT_TOKEN
 from database import init_db, get_or_create_user, register_referral_visit, get_referral_link_by_code
@@ -125,23 +125,33 @@ async def back_to_menu(callback: CallbackQuery):
         await callback.answer("Слишком много запросов. Подождите минуту.", show_alert=True)
         return
 
-    try:
-        # Пытаемся отредактировать caption (если это фото)
-        await callback.message.edit_caption(
-            caption="👋 Приветствуем тебя в Supercell Shop!\n\n"
+    caption_text = ("👋 Приветствуем тебя в Supercell Shop!\n\n"
                     "Самые низкие цены и безопасный донат ждут тебя!\n"
-                    "Воспользуйся кнопками ниже 👇",
+                    "Воспользуйся кнопками ниже 👇")
+
+    photo_path = BASE_DIR / "main.png"
+
+    try:
+        # Пытаемся отредактировать caption (если это уже фото)
+        await callback.message.edit_caption(
+            caption=caption_text,
             reply_markup=get_main_menu()
         )
     except Exception as e:
-        # Если не получилось (сообщение без фото), используем edit_text
+        # Если не получилось (сообщение без фото), используем edit_media
         try:
-            await callback.message.edit_text(
-                text="👋 Приветствуем тебя в Supercell Shop!\n\n"
-                     "Самые низкие цены и безопасный донат ждут тебя!\n"
-                     "Воспользуйся кнопками ниже 👇",
-                reply_markup=get_main_menu()
-            )
+            if photo_path.exists():
+                photo = FSInputFile(str(photo_path))
+                await callback.message.edit_media(
+                    media=InputMediaPhoto(media=photo, caption=caption_text),
+                    reply_markup=get_main_menu()
+                )
+            else:
+                # Если фото не найдено, просто редактируем текст
+                await callback.message.edit_text(
+                    text=caption_text,
+                    reply_markup=get_main_menu()
+                )
         except Exception as inner_e:
             logger.error(f"Ошибка при возврате в меню: {inner_e}")
     await callback.answer()

@@ -745,6 +745,56 @@ async def back_to_product(callback: CallbackQuery, state: FSMContext):
     await _show_edit_menu_internal(callback, state, product_id)
 
 
+@router.callback_query(F.data.startswith("managesubcat_"), EditProductStates.edit_menu)
+async def back_to_category_from_edit(callback: CallbackQuery, state: FSMContext):
+    """Вернуться к списку товаров категории из меню редактирования"""
+    subcategory = callback.data.replace("managesubcat_", "")
+    data = await state.get_data()
+    game = data.get("game")
+
+    if not game:
+        await callback.answer("Ошибка: игра не найдена", show_alert=True)
+        await state.clear()
+        return
+
+    await state.update_data(subcategory=subcategory)
+
+    # Получаем товары
+    products = await get_products_by_game_and_subcategory(game, subcategory)
+
+    if not products:
+        keyboard = [[InlineKeyboardButton(text="Назад", callback_data=f"manageprod_{game}")]]
+        await callback.message.edit_text(
+            "В этой категории нет товаров",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
+        )
+        await state.set_state(EditProductStates.select_game)
+        await callback.answer()
+        return
+
+    keyboard = []
+    for product in products:
+        # product: (id, name, description, price, game, subcategory, in_stock, image_file_id, created_at, image_path)
+        product_id = product[0]
+        name = product[1]
+        price = product[3]
+        in_stock = product[6]
+        status = "✅" if in_stock else "❌"
+        keyboard.append([InlineKeyboardButton(
+            text=f"{status} {name} - {price:.0f} ₽",
+            callback_data=f"editprod_{product_id}"
+        )])
+
+    keyboard.append([InlineKeyboardButton(text="Отмена", callback_data="admin_products")])
+
+    await callback.message.edit_text(
+        "Выберите товар для редактирования:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
+    )
+    await state.set_state(EditProductStates.select_product)
+    await callback.answer()
+
+
 # Обработчики действий с товаром
 @router.callback_query(F.data.startswith("toggle_visibility_"))
 async def toggle_product_visibility(callback: CallbackQuery, state: FSMContext):
