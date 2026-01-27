@@ -492,7 +492,7 @@ function getCategoryName(subcategory) {
 // Инициализация
 async function init() {
     setupEventListeners();
-    initBannerSlider();
+    // initBannerSlider(); // Закомментировано
     initRippleEffects();
     await loadUserProfile();
     await loadAllProducts();
