@@ -477,9 +477,6 @@ function getCategoryName(subcategory) {
         'all': 'Общее',
         'akcii': 'Акции',
         'gems': 'Гемы',
-        // Brawl Stars
-        'brawlers': 'Бравлеры',
-        'skiny': 'Скины',
         // Clash Royale
         'geroi': 'Герои',
         'evolutions': 'Эволюции',
@@ -876,9 +873,7 @@ function displayCategories(game) {
     const categories = {
         brawlstars: [
             { name: 'Акции', subcategory: 'akcii', emoji: '🔥' },
-            { name: 'Гемы', subcategory: 'gems', emoji: '💎' },
-            { name: 'Бравлеры', subcategory: 'brawlers', emoji: '🦸' },
-            { name: 'Скины', subcategory: 'skiny', emoji: '🎨' }
+            { name: 'Гемы', subcategory: 'gems', emoji: '💎' }
         ],
         clashroyale: [
             { name: 'Акции', subcategory: 'akcii', emoji: '🔥' },

@@ -611,8 +611,6 @@ async def manage_select_game(callback: CallbackQuery, state: FSMContext):
             ("all", "Общее"),
             ("akcii", "Акции"),
             ("gems", "Гемы"),
-            ("brawlers", "Бравлеры"),
-            ("skiny", "Скины"),
         ],
         "clashroyale": [
             ("all", "Общее"),
@@ -659,18 +657,22 @@ async def manage_select_subcategory(callback: CallbackQuery, state: FSMContext):
     products = await get_products_by_game_and_subcategory(game, subcategory)
 
     if not products:
-        keyboard = [[InlineKeyboardButton(text="Назад", callback_data="admin_products")]]
+        keyboard = [[InlineKeyboardButton(text="Назад", callback_data=f"manageprod_{game}")]]
         await callback.message.edit_text(
             "В этой категории нет товаров",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
         )
-        await state.clear()
+        await state.set_state(EditProductStates.select_game)
         await callback.answer()
         return
 
     keyboard = []
     for product in products:
-        product_id, name, description, price, _, _, in_stock, _, _ = product
+        # product: (id, name, description, price, game, subcategory, in_stock, image_file_id, created_at, image_path)
+        product_id = product[0]
+        name = product[1]
+        price = product[3]
+        in_stock = product[6]
         status = "✅" if in_stock else "❌"
         keyboard.append([InlineKeyboardButton(
             text=f"{status} {name} - {price:.0f} ₽",
@@ -980,8 +982,6 @@ async def select_game_for_product(callback: CallbackQuery, state: FSMContext):
             ("all", "📦 Общее"),
             ("akcii", "🔥 Акции"),
             ("gems", "💎 Гемы"),
-            ("brawlers", "🦸 Бравлеры"),
-            ("skiny", "🎨 Скины"),
         ],
         "clashroyale": [
             ("all", "📦 Общее"),
