@@ -670,7 +670,7 @@ async def manage_select_subcategory(callback: CallbackQuery, state: FSMContext):
 
     keyboard = []
     for product in products:
-        product_id, name, description, price, _, _, in_stock, _ = product
+        product_id, name, description, price, _, _, in_stock, _, _ = product
         status = "✅" if in_stock else "❌"
         keyboard.append([InlineKeyboardButton(
             text=f"{status} {name} - {price:.0f} ₽",
