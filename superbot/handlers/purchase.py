@@ -28,9 +28,11 @@ async def buy_product(callback: CallbackQuery):
     image_file_id = product[7] if len(product) > 7 else None
 
     # Показываем информацию о товаре
+    # Если товар из категории "all", возвращаемся на страницу игры, иначе на страницу категории
+    back_callback = f"category_{game}" if subcategory == "all" else f"{game}_{subcategory}"
     keyboard = [
         [InlineKeyboardButton(text="💳 Купить", callback_data=f"confirm_buy_{product_id}")],
-        [InlineKeyboardButton(text="Назад", callback_data=f"{game}_{subcategory}")]
+        [InlineKeyboardButton(text="Назад", callback_data=back_callback)]
     ]
 
     # Описание + цена (без .00)
