@@ -1028,6 +1028,33 @@ body {
     margin-bottom: 20px;
 }
 
+/* Стилизация поискового инпута */
+#searchInput {
+    width: 100%;
+    padding: 14px 16px;
+    background: linear-gradient(135deg, rgba(255,255,255,0.1), rgba(255,255,255,0.05));
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1.5px solid rgba(255, 255, 255, 0.15);
+    border-radius: 16px;
+    color: white;
+    font-size: 15px;
+    outline: none;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+#searchInput:focus {
+    border-color: var(--accent-blue);
+    background: linear-gradient(135deg, rgba(255,255,255,0.12), rgba(255,255,255,0.07));
+    box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.15), 0 8px 20px rgba(0, 0, 0, 0.15);
+    transform: translateY(-1px);
+}
+
+#searchInput::placeholder {
+    color: var(--text-secondary);
+}
+
 .search-input-wrapper {
     flex: 1;
     position: relative;

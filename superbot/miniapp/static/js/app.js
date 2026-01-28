@@ -482,9 +482,7 @@ function getCategoryName(subcategory) {
         'evolutions': 'Эволюции',
         'emoji': 'Эмодзи',
         'etapnye': 'Этапные',
-        'karty': 'Карты',
-        // Clash of Clans
-        'oformlenie': 'Оформление'
+        'karty': 'Карты'
     };
     return names[subcategory] || subcategory;
 }
@@ -886,8 +884,7 @@ function displayCategories(game) {
         ],
         clashofclans: [
             { name: 'Акции', subcategory: 'akcii', emoji: '🔥' },
-            { name: 'Гемы', subcategory: 'gems', emoji: '💎' },
-            { name: 'Оформление', subcategory: 'oformlenie', emoji: '🏠' }
+            { name: 'Гемы', subcategory: 'gems', emoji: '💎' }
         ]
     };
 

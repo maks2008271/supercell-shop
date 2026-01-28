@@ -626,7 +626,6 @@ async def manage_select_game(callback: CallbackQuery, state: FSMContext):
             ("all", "Общее"),
             ("akcii", "Акции"),
             ("gems", "Гемы"),
-            ("oformlenie", "Оформление"),
         ]
     }
 
@@ -1047,7 +1046,6 @@ async def select_game_for_product(callback: CallbackQuery, state: FSMContext):
             ("all", "📦 Общее"),
             ("akcii", "🔥 Акции"),
             ("gems", "💎 Гемы"),
-            ("oformlenie", "🏠 Оформление"),
         ]
     }
 

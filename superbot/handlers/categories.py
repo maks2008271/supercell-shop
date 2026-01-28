@@ -44,7 +44,6 @@ CATEGORIES = {
         "categories": [
             {"id": "akcii", "name": "Акции", "emoji": "🔥"},
             {"id": "gems", "name": "Гемы", "emoji": "💎"},
-            {"id": "oformlenie", "name": "Оформление", "emoji": "🏠"},
         ]
     }
 }
