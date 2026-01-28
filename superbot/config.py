@@ -21,7 +21,7 @@ REVIEWS_CHANNEL = os.getenv("REVIEWS_CHANNEL", "https://t.me/SupercellShopreview
 NEWS_CHANNEL = os.getenv("NEWS_CHANNEL", "@your_news_channel")
 
 # Ссылка на поддержку
-SUPPORT_URL = os.getenv("SUPPORT_URL", "https://t.me/your_support")
+SUPPORT_URL = os.getenv("SUPPORT_URL", "https://t.me/Supercellshop_abmin")
 
 # Ссылка на оферту обслуживания
 OFFER_URL = os.getenv("OFFER_URL", "https://telegra.ph/Oferta-obsluzhivaniya-01-19")
