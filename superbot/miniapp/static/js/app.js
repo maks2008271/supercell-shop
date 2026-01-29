@@ -482,7 +482,8 @@ function getCategoryName(subcategory) {
         'evolutions': 'Эволюции',
         'emoji': 'Эмодзи',
         'etapnye': 'Этапные',
-        'karty': 'Карты'
+        'karty': 'Легендарные карты',
+        'kartychempion': 'Карты чемпионов'
     };
     return names[subcategory] || subcategory;
 }
