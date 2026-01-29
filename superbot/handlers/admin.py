@@ -620,7 +620,8 @@ async def manage_select_game(callback: CallbackQuery, state: FSMContext):
             ("evolutions", "Эволюции"),
             ("emoji", "Эмодзи"),
             ("etapnye", "Этапные"),
-            ("karty", "Карты"),
+            ("karty", "Легендарные карты"),
+            ("kartychempion", "Карты чемпионов"),
         ],
         "clashofclans": [
             ("all", "Общее"),
@@ -1040,7 +1041,8 @@ async def select_game_for_product(callback: CallbackQuery, state: FSMContext):
             ("evolutions", "⚡ Эволюции"),
             ("emoji", "😀 Эмодзи"),
             ("etapnye", "📈 Этапные"),
-            ("karty", "🃏 Карты"),
+            ("karty", "🃏 Легендарные карты"),
+            ("kartychempion", "🏆 Карты чемпионов"),
         ],
         "clashofclans": [
             ("all", "📦 Общее"),
@@ -1200,7 +1202,13 @@ async def enter_product_price(message: Message, state: FSMContext):
     subcat_names = {
         "akcii": "Акции",
         "gems": "Гемы",
-        "all": "Все категории"
+        "all": "Все категории",
+        "geroi": "Герои",
+        "evolutions": "Эволюции",
+        "emoji": "Эмодзи",
+        "etapnye": "Этапные",
+        "karty": "Легендарные карты",
+        "kartychempion": "Карты чемпионов"
     }
 
     text = (
