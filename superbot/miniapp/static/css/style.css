@@ -597,6 +597,33 @@ body {
     margin-top: 20px;
     padding-top: 16px;
     border-top: 1px solid rgba(255,255,255,0.08);
+    text-align: center;
+}
+
+.footer-links {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+}
+
+.footer-links a {
+    color: var(--text-secondary);
+    font-size: 12px;
+    text-decoration: none;
+    transition: color 0.2s ease;
+}
+
+.footer-links a:hover {
+    color: var(--accent-purple);
+}
+
+.footer-divider {
+    color: var(--text-secondary);
+    opacity: 0.5;
+    font-size: 12px;
 }
 
 .footer-copyright {
