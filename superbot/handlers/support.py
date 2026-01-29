@@ -12,6 +12,8 @@ async def show_support(callback: CallbackQuery):
     keyboard = [
         [InlineKeyboardButton(text="Написать в поддержку", url=SUPPORT_URL)],
         [InlineKeyboardButton(text="Оферта обслуживания", url=OFFER_URL)],
+        [InlineKeyboardButton(text="Пользовательское соглашение", url="https://telegra.ph/POLZOVATELSKOE-SOGLASHENIE-01-28-67")],
+        [InlineKeyboardButton(text="Политика конфиденциальности", url="https://telegra.ph/Politika-konfidencialnosti-01-28-92")],
         [InlineKeyboardButton(text="Назад", callback_data="main_menu")]
     ]
 
