@@ -880,7 +880,8 @@ function displayCategories(game) {
             { name: 'Эволюции', subcategory: 'evolutions', emoji: '⚡' },
             { name: 'Эмодзи', subcategory: 'emoji', emoji: '😀' },
             { name: 'Этапные', subcategory: 'etapnye', emoji: '📈' },
-            { name: 'Карты', subcategory: 'karty', emoji: '🃏' }
+            { name: 'Легендарные карты', subcategory: 'karty', emoji: '🃏' },
+            { name: 'Карты чемпионов', subcategory: 'kartychempion', emoji: '🏆' }
         ],
         clashofclans: [
             { name: 'Акции', subcategory: 'akcii', emoji: '🔥' },

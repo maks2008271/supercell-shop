@@ -36,7 +36,8 @@ CATEGORIES = {
             {"id": "evolutions", "name": "Эволюции", "emoji": "⚡"},
             {"id": "emoji", "name": "Эмодзи", "emoji": "😀"},
             {"id": "etapnye", "name": "Этапные", "emoji": "📈"},
-            {"id": "karty", "name": "Карты", "emoji": "🃏"},
+            {"id": "karty", "name": "Легендарные карты", "emoji": "🃏"},
+            {"id": "kartychempion", "name": "Карты чемпионов", "emoji": "🏆"},
         ]
     },
     "clashofclans": {
