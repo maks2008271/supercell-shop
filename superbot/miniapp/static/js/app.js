@@ -24,6 +24,7 @@ const API_URL = window.location.origin + '/api';
 // Получаем данные пользователя из Telegram или используем тестовые
 const userId = tg.initDataUnsafe?.user?.id || 123456789; // Тестовый ID для разработки
 const userName = tg.initDataUnsafe?.user?.first_name || 'Тестовый пользователь';
+const userPhotoUrl = tg.initDataUnsafe?.user?.photo_url || null; // URL аватарки от Telegram
 
 // Получаем initData для авторизации запросов
 const initData = tg.initData || '';
@@ -702,25 +703,17 @@ async function loadUserProfile() {
 }
 
 function loadUserAvatar() {
-    if (!userId) return;
-
-    const avatarUrl = `${API_URL}/user/${userId}/avatar`;
+    // Используем photo_url от Telegram WebApp API
+    if (!userPhotoUrl) return;
 
     // Загружаем аватарку в навбар
     const navAvatar = document.getElementById('navAvatar');
     const navPlaceholder = document.getElementById('navAvatarPlaceholder');
 
     if (navAvatar) {
-        const navImg = new Image();
-        navImg.onload = function() {
-            navAvatar.src = avatarUrl;
-            navAvatar.style.display = 'block';
-            if (navPlaceholder) navPlaceholder.style.display = 'none';
-        };
-        navImg.onerror = function() {
-            // Оставляем плейсхолдер
-        };
-        navImg.src = avatarUrl;
+        navAvatar.src = userPhotoUrl;
+        navAvatar.style.display = 'block';
+        if (navPlaceholder) navPlaceholder.style.display = 'none';
     }
 
     // Загружаем аватарку в профиль
@@ -728,16 +721,9 @@ function loadUserAvatar() {
     const profilePlaceholder = document.getElementById('profileAvatarPlaceholder');
 
     if (profileAvatar) {
-        const profileImg = new Image();
-        profileImg.onload = function() {
-            profileAvatar.src = avatarUrl;
-            profileAvatar.style.display = 'block';
-            if (profilePlaceholder) profilePlaceholder.style.display = 'none';
-        };
-        profileImg.onerror = function() {
-            // Оставляем плейсхолдер
-        };
-        profileImg.src = avatarUrl;
+        profileAvatar.src = userPhotoUrl;
+        profileAvatar.style.display = 'block';
+        if (profilePlaceholder) profilePlaceholder.style.display = 'none';
     }
 }
 
