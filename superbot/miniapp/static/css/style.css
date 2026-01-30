@@ -531,17 +531,19 @@ body {
 }
 
 .contact-buttons {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
+    display: flex;
     gap: 10px;
     margin-bottom: 12px;
 }
 
 .contact-btn {
+    flex: 1;
     display: flex;
+    flex-direction: column;
     align-items: center;
-    gap: 10px;
-    padding: 12px 14px;
+    text-align: center;
+    gap: 8px;
+    padding: 14px 10px;
     background: linear-gradient(135deg, rgba(255,255,255,0.08), rgba(255,255,255,0.03));
     backdrop-filter: blur(10px);
     border: 1px solid rgba(255,255,255,0.12);
@@ -600,20 +602,21 @@ body {
 }
 
 .contact-info {
-    text-align: left;
+    text-align: center;
     min-width: 0;
 }
 
 .contact-title {
-    font-size: 11px;
-    font-weight: 500;
-    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
     margin-bottom: 2px;
 }
 
 .contact-subtitle {
-    font-size: 12px;
-    font-weight: 500;
+    font-size: 10px;
+    font-weight: 400;
+    color: var(--text-secondary);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
