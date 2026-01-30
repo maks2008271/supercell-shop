@@ -568,12 +568,12 @@ async def get_products_by_game_and_subcategory(game: str = None, subcategory: st
                 return await cursor.fetchall()
 
 
-async def update_product(product_id: int, name: str = None, description: str = None, price: float = None):
+async def update_product(product_id: int, name: str = None, description: str = None, price: float = None, image_file_id: str = None):
     """Обновить товар"""
     async with aiosqlite.connect(DB_NAME) as db:
         updates = []
         params = []
-        
+
         if name is not None:
             updates.append("name = ?")
             params.append(name)
@@ -583,7 +583,10 @@ async def update_product(product_id: int, name: str = None, description: str = N
         if price is not None:
             updates.append("price = ?")
             params.append(price)
-        
+        if image_file_id is not None:
+            updates.append("image_file_id = ?")
+            params.append(image_file_id)
+
         if updates:
             query = f"UPDATE products SET {', '.join(updates)} WHERE id = ?"
             params.append(product_id)

@@ -44,6 +44,7 @@ class EditProductStates(StatesGroup):
     edit_name = State()
     edit_description = State()
     edit_price = State()
+    edit_image = State()
 
 
 # FSM для создания реферальной ссылки
@@ -55,6 +56,13 @@ class CreateReferralStates(StatesGroup):
 # FSM для управления пользователями
 class UserManagementStates(StatesGroup):
     search_user = State()
+
+
+# FSM для управления изображениями категорий
+class CategoryImageStates(StatesGroup):
+    select_game = State()
+    select_category = State()
+    upload_image = State()
 
 
 def is_admin(user_id: int) -> bool:
@@ -565,6 +573,7 @@ async def show_products_menu(callback: CallbackQuery):
     keyboard = [
         [InlineKeyboardButton(text="➕ Добавить товар", callback_data="product_add")],
         [InlineKeyboardButton(text="📋 Управление товарами", callback_data="product_manage")],
+        [InlineKeyboardButton(text="🖼 Изображения категорий", callback_data="category_images")],
         [InlineKeyboardButton(text="Назад", callback_data="admin_panel")]
     ]
 
@@ -717,6 +726,7 @@ async def _show_edit_menu_internal(callback: CallbackQuery, state: FSMContext, p
         [InlineKeyboardButton(text="✏️ Изменить название", callback_data=f"edit_name_{product_id}")],
         [InlineKeyboardButton(text="📝 Изменить описание", callback_data=f"edit_desc_{product_id}")],
         [InlineKeyboardButton(text="💰 Изменить цену", callback_data=f"edit_price_{product_id}")],
+        [InlineKeyboardButton(text="🖼 Изменить изображение", callback_data=f"edit_image_{product_id}")],
         [InlineKeyboardButton(text=toggle_text, callback_data=f"toggle_visibility_{product_id}")],
         [InlineKeyboardButton(text="🗑 Удалить товар", callback_data=f"delete_prod_{product_id}")],
         [InlineKeyboardButton(text="Назад", callback_data=f"managesubcat_{subcategory}")]
@@ -995,6 +1005,50 @@ async def save_edit_price(message: Message, state: FSMContext):
     )
 
 
+@router.callback_query(F.data.startswith("edit_image_"))
+async def start_edit_image(callback: CallbackQuery, state: FSMContext):
+    """Начать редактирование изображения"""
+    product_id = int(callback.data.replace("edit_image_", ""))
+    await state.update_data(product_id=product_id)
+
+    await callback.message.edit_text(
+        "Отправьте новое изображение товара:\n\n"
+        "Отправьте /cancel для отмены"
+    )
+    await state.set_state(EditProductStates.edit_image)
+    await callback.answer()
+
+
+@router.message(EditProductStates.edit_image, F.text == "/cancel")
+async def cancel_edit_image(message: Message, state: FSMContext):
+    """Отменить редактирование изображения"""
+    await state.clear()
+    await message.answer(
+        "Редактирование отменено",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="Назад в управление товарами", callback_data="admin_products")]
+        ])
+    )
+
+
+@router.message(EditProductStates.edit_image, F.photo)
+async def save_edit_image(message: Message, state: FSMContext):
+    """Сохранить новое изображение"""
+    data = await state.get_data()
+    product_id = data["product_id"]
+
+    # Получаем file_id самого большого фото
+    photo = message.photo[-1]
+    await update_product(product_id, image_file_id=photo.file_id)
+
+    await message.answer(
+        "✅ Изображение обновлено",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="Назад к товару", callback_data=f"backtoprod_{product_id}")]
+        ])
+    )
+
+
 # ===== ДОБАВЛЕНИЕ ТОВАРА =====
 
 @router.callback_query(F.data == "product_add")
@@ -1226,6 +1280,161 @@ async def enter_product_price(message: Message, state: FSMContext):
     await message.answer(
         text,
         reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
+    )
+
+
+# ===== УПРАВЛЕНИЕ ИЗОБРАЖЕНИЯМИ КАТЕГОРИЙ =====
+
+from pathlib import Path
+
+CATEGORY_IMAGES_DIR = Path(__file__).parent.parent / "miniapp" / "static" / "images" / "categories"
+
+CATEGORY_IMAGE_OPTIONS = {
+    "brawlstars": [
+        ("akcii", "🔥 Акции"),
+        ("gems", "💎 Гемы"),
+        ("main", "🏠 Главная"),
+    ],
+    "clashroyale": [
+        ("akcii", "🔥 Акции"),
+        ("gems", "💎 Гемы"),
+        ("geroi", "🦸 Герои"),
+        ("evolutions", "⚡ Эволюции"),
+        ("emoji", "😀 Эмодзи"),
+        ("etapnye", "📈 Этапные"),
+        ("karty", "🃏 Легендарные карты"),
+        ("kartychempion", "🏆 Карты чемпионов"),
+        ("main", "🏠 Главная"),
+    ],
+    "clashofclans": [
+        ("akcii", "🔥 Акции"),
+        ("gems", "💎 Гемы"),
+        ("main", "🏠 Главная"),
+    ]
+}
+
+
+@router.callback_query(F.data == "category_images")
+async def show_category_images_menu(callback: CallbackQuery, state: FSMContext):
+    """Показать меню управления изображениями категорий"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("У вас нет доступа", show_alert=True)
+        return
+
+    keyboard = [
+        [InlineKeyboardButton(text="Brawl Stars", callback_data="catimg_brawlstars")],
+        [InlineKeyboardButton(text="Clash Royale", callback_data="catimg_clashroyale")],
+        [InlineKeyboardButton(text="Clash of Clans", callback_data="catimg_clashofclans")],
+        [InlineKeyboardButton(text="Назад", callback_data="admin_products")]
+    ]
+
+    await callback.message.edit_text(
+        "🖼 Управление изображениями категорий\n\nВыберите игру:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
+    )
+    await state.set_state(CategoryImageStates.select_game)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("catimg_"), CategoryImageStates.select_game)
+async def select_game_for_category_image(callback: CallbackQuery, state: FSMContext):
+    """Выбрать игру для изменения изображения категории"""
+    game = callback.data.replace("catimg_", "")
+    await state.update_data(game=game)
+
+    categories = CATEGORY_IMAGE_OPTIONS.get(game, [])
+    keyboard = []
+    row = []
+    for cat_id, cat_name in categories:
+        row.append(InlineKeyboardButton(text=cat_name, callback_data=f"catimgsel_{cat_id}"))
+        if len(row) == 2:
+            keyboard.append(row)
+            row = []
+    if row:
+        keyboard.append(row)
+
+    keyboard.append([InlineKeyboardButton(text="Назад", callback_data="category_images")])
+
+    await callback.message.edit_text(
+        "Выберите категорию для изменения изображения:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
+    )
+    await state.set_state(CategoryImageStates.select_category)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "category_images", CategoryImageStates.select_category)
+async def back_to_category_images_menu(callback: CallbackQuery, state: FSMContext):
+    """Вернуться к выбору игры"""
+    await state.clear()
+    await show_category_images_menu(callback, state)
+
+
+@router.callback_query(F.data.startswith("catimgsel_"), CategoryImageStates.select_category)
+async def select_category_for_image(callback: CallbackQuery, state: FSMContext):
+    """Выбрать категорию для загрузки изображения"""
+    category = callback.data.replace("catimgsel_", "")
+    data = await state.get_data()
+    game = data["game"]
+
+    await state.update_data(category=category)
+
+    # Проверяем, существует ли текущее изображение
+    image_path = CATEGORY_IMAGES_DIR / game / f"{category}.png"
+    status = "✅ Изображение есть" if image_path.exists() else "❌ Изображения нет"
+
+    await callback.message.edit_text(
+        f"🖼 Изменение изображения категории\n\n"
+        f"Игра: {game}\n"
+        f"Категория: {category}\n"
+        f"Статус: {status}\n\n"
+        f"Отправьте новое изображение:\n"
+        f"Отправьте /cancel для отмены"
+    )
+    await state.set_state(CategoryImageStates.upload_image)
+    await callback.answer()
+
+
+@router.message(CategoryImageStates.upload_image, F.text == "/cancel")
+async def cancel_category_image_upload(message: Message, state: FSMContext):
+    """Отменить загрузку изображения категории"""
+    await state.clear()
+    await message.answer(
+        "Загрузка отменена",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="Назад", callback_data="category_images")]
+        ])
+    )
+
+
+@router.message(CategoryImageStates.upload_image, F.photo)
+async def save_category_image(message: Message, state: FSMContext, bot: Bot):
+    """Сохранить изображение категории"""
+    data = await state.get_data()
+    game = data["game"]
+    category = data["category"]
+
+    # Создаем папку если не существует
+    game_dir = CATEGORY_IMAGES_DIR / game
+    game_dir.mkdir(parents=True, exist_ok=True)
+
+    # Получаем файл
+    photo = message.photo[-1]
+    file = await bot.get_file(photo.file_id)
+
+    # Скачиваем и сохраняем
+    image_path = game_dir / f"{category}.png"
+    await bot.download_file(file.file_path, image_path)
+
+    await state.clear()
+    await message.answer(
+        f"✅ Изображение категории обновлено!\n\n"
+        f"Игра: {game}\n"
+        f"Категория: {category}",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="Изменить ещё", callback_data="category_images")],
+            [InlineKeyboardButton(text="Назад в управление товарами", callback_data="admin_products")]
+        ])
     )
 
 
