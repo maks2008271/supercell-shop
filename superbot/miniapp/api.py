@@ -878,6 +878,60 @@ async def payment_fail():
 # ============================================
 
 
+@app.get("/api/user/{user_id}/avatar")
+async def get_user_avatar(user_id: int):
+    """Получить аватарку пользователя через Telegram Bot API"""
+    try:
+        async with aiohttp.ClientSession() as session:
+            # Получаем фото профиля пользователя
+            async with session.get(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/getUserProfilePhotos?user_id={user_id}&limit=1"
+            ) as resp:
+                if resp.status != 200:
+                    raise HTTPException(status_code=404, detail="Avatar not found")
+
+                data = await resp.json()
+                if not data.get("ok") or data["result"]["total_count"] == 0:
+                    raise HTTPException(status_code=404, detail="No avatar")
+
+                # Берём самый маленький размер (первый в массиве)
+                photo = data["result"]["photos"][0][0]
+                file_id = photo["file_id"]
+
+            # Получаем file_path
+            async with session.get(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/getFile?file_id={file_id}"
+            ) as resp:
+                if resp.status != 200:
+                    raise HTTPException(status_code=404, detail="File not found")
+
+                file_data = await resp.json()
+                if not file_data.get("ok"):
+                    raise HTTPException(status_code=404, detail="File not found")
+
+                file_path = file_data["result"]["file_path"]
+
+            # Скачиваем файл
+            async with session.get(
+                f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_path}"
+            ) as resp:
+                if resp.status != 200:
+                    raise HTTPException(status_code=404, detail="Failed to download")
+
+                image_data = await resp.read()
+
+                return StreamingResponse(
+                    BytesIO(image_data),
+                    media_type="image/jpeg",
+                    headers={"Cache-Control": "public, max-age=3600"}  # Кэш на 1 час
+                )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error loading avatar for user {user_id}: {e}")
+        raise HTTPException(status_code=404, detail="Avatar not found")
+
+
 @app.get("/api/product-image/{file_id}")
 async def get_product_image(file_id: str):
     """Получить изображение товара через Telegram Bot API"""

@@ -696,13 +696,77 @@ async function loadUserProfile() {
     } catch (error) {
         console.error('Error loading profile:', error);
     }
+
+    // Загружаем аватарку
+    loadUserAvatar();
+}
+
+function loadUserAvatar() {
+    if (!userId) return;
+
+    const avatarUrl = `${API_URL}/user/${userId}/avatar`;
+
+    // Загружаем аватарку в навбар
+    const navAvatar = document.getElementById('navAvatar');
+    const navPlaceholder = document.getElementById('navAvatarPlaceholder');
+
+    if (navAvatar) {
+        const navImg = new Image();
+        navImg.onload = function() {
+            navAvatar.src = avatarUrl;
+            navAvatar.style.display = 'block';
+            if (navPlaceholder) navPlaceholder.style.display = 'none';
+        };
+        navImg.onerror = function() {
+            // Оставляем плейсхолдер
+        };
+        navImg.src = avatarUrl;
+    }
+
+    // Загружаем аватарку в профиль
+    const profileAvatar = document.getElementById('profileAvatar');
+    const profilePlaceholder = document.getElementById('profileAvatarPlaceholder');
+
+    if (profileAvatar) {
+        const profileImg = new Image();
+        profileImg.onload = function() {
+            profileAvatar.src = avatarUrl;
+            profileAvatar.style.display = 'block';
+            if (profilePlaceholder) profilePlaceholder.style.display = 'none';
+        };
+        profileImg.onerror = function() {
+            // Оставляем плейсхолдер
+        };
+        profileImg.src = avatarUrl;
+    }
 }
 
 function updateProfileUI() {
     if (!userProfile) return;
 
-    elements.userUID.textContent = `#${userProfile.uid}`;
-    elements.userOrders.textContent = userProfile.orders_count;
+    // UID в боте
+    const userUIDEl = document.getElementById('userUID');
+    if (userUIDEl) {
+        userUIDEl.textContent = `#${userProfile.uid}`;
+    }
+
+    // Количество заказов
+    const userOrdersEl = document.getElementById('userOrders');
+    if (userOrdersEl) {
+        userOrdersEl.textContent = userProfile.orders_count;
+    }
+
+    // Telegram ID
+    const userTelegramIdEl = document.getElementById('userTelegramId');
+    if (userTelegramIdEl) {
+        userTelegramIdEl.textContent = userId;
+    }
+
+    // Имя пользователя
+    const profileUserNameEl = document.getElementById('profileUserName');
+    if (profileUserNameEl) {
+        profileUserNameEl.textContent = userName;
+    }
 }
 
 async function openProfile() {

@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Supercell Shop</title>
-    <link rel="stylesheet" href="../static/css/style.css?v=21">
+    <link rel="stylesheet" href="../static/css/style.css?v=22">
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
 <body>
@@ -31,8 +31,9 @@
                         <path d="M21 21L15 15M17 10C17 13.866 13.866 17 10 17C6.13401 17 3 13.866 3 10C3 6.13401 6.13401 3 10 3C13.866 3 17 6.13401 17 10Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                     </svg>
                 </button>
-                <button class="nav-btn" id="profileBtn">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                <button class="nav-btn nav-avatar-btn" id="profileBtn">
+                    <img class="nav-avatar" id="navAvatar" src="" alt="" style="display: none;">
+                    <svg class="nav-avatar-placeholder" id="navAvatarPlaceholder" width="24" height="24" viewBox="0 0 24 24" fill="none">
                         <path d="M20 21V19C20 17.9391 19.5786 16.9217 18.8284 16.1716C18.0783 15.4214 17.0609 15 16 15H8C6.93913 15 5.92172 15.4214 5.17157 16.1716C4.42143 16.9217 4 17.9391 4 19V21M16 7C16 9.20914 14.2091 11 12 11C9.79086 11 8 9.20914 8 7C8 4.79086 9.79086 3 12 3C14.2091 3 16 4.79086 16 7Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                     </svg>
                 </button>
@@ -435,15 +436,21 @@
         </div>
         <div class="profile-content">
             <div class="profile-card">
-                <div class="profile-avatar">
-                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
+                <div class="profile-avatar" id="profileAvatarContainer">
+                    <img class="profile-avatar-img" id="profileAvatar" src="" alt="" style="display: none;">
+                    <svg class="profile-avatar-placeholder" id="profileAvatarPlaceholder" width="48" height="48" viewBox="0 0 24 24" fill="none">
                         <path d="M20 21V19C20 17.9391 19.5786 16.9217 18.8284 16.1716C18.0783 15.4214 17.0609 15 16 15H8C6.93913 15 5.92172 15.4214 5.17157 16.1716C4.42143 16.9217 4 17.9391 4 19V21M16 7C16 9.20914 14.2091 11 12 11C9.79086 11 8 9.20914 8 7C8 4.79086 9.79086 3 12 3C14.2091 3 16 4.79086 16 7Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                     </svg>
                 </div>
+                <div class="profile-user-name" id="profileUserName">Пользователь</div>
                 <div class="profile-info">
                     <div class="profile-stat">
-                        <span class="stat-label">UID:</span>
-                        <span class="stat-value" id="userUID">#1234</span>
+                        <span class="stat-label">Telegram ID:</span>
+                        <span class="stat-value" id="userTelegramId">—</span>
+                    </div>
+                    <div class="profile-stat">
+                        <span class="stat-label">UID в боте:</span>
+                        <span class="stat-value" id="userUID">#—</span>
                     </div>
                     <div class="profile-stat">
                         <span class="stat-label">Заказов:</span>
@@ -462,6 +469,6 @@
         </div>
     </div>
 
-    <script src="../static/js/app.js?v=21"></script>
+    <script src="../static/js/app.js?v=22"></script>
 </body>
 </html>
