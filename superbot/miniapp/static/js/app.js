@@ -8,16 +8,6 @@ if (tg.expand) {
     tg.ready();
 }
 
-// iOS Safari fix: перерисовка при возвращении из свернутого состояния
-document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') {
-        // Принудительная перерисовка
-        document.body.style.display = 'none';
-        document.body.offsetHeight; // Trigger reflow
-        document.body.style.display = '';
-    }
-});
-
 // API Base URL
 const API_URL = window.location.origin + '/api';
 
