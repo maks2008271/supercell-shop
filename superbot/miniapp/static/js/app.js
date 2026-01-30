@@ -8,6 +8,16 @@ if (tg.expand) {
     tg.ready();
 }
 
+// iOS Safari fix: перерисовка при возвращении из свернутого состояния
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+        // Принудительная перерисовка
+        document.body.style.display = 'none';
+        document.body.offsetHeight; // Trigger reflow
+        document.body.style.display = '';
+    }
+});
+
 // API Base URL
 const API_URL = window.location.origin + '/api';
 
@@ -1002,15 +1012,12 @@ function displayCategoryProducts(products) {
             imageHtml = '<span class="placeholder-icon">💎</span>';
         }
 
-        const badge = product.subcategory === 'akcii' ? '<span class="product-badge">Sale</span>' : '';
-
         const description = product.description || 'Нет описания';
         return `
             <div class="product-card ripple" data-game="${currentGame}" style="animation-delay: ${index * 0.05}s">
                 <div class="product-image">
                     ${imageHtml}
                     <span class="product-price-badge">${formatPrice(product.price)}₽</span>
-                    ${badge}
                 </div>
                 <div class="product-header" onclick="toggleProductDescription(this)">
                     <span class="product-name">${product.name}</span>
@@ -1095,14 +1102,11 @@ function displayProducts(products, gridElement, countElement) {
             imageHtml = '<span class="placeholder-icon">💎</span>';
         }
 
-        const badge = product.subcategory === 'akcii' ? '<span class="product-badge">Sale</span>' : '';
-
         return `
             <div class="product-card ripple" data-game="${currentGame}" onclick="handleProductClick(${index})" style="animation-delay: ${index * 0.05}s">
                 <div class="product-image">
                     ${imageHtml}
                     <span class="product-price-badge">${formatPrice(product.price)}₽</span>
-                    ${badge}
                     <span class="product-watermark">SUPERCELL SHOP</span>
                 </div>
                 <div class="product-header">
