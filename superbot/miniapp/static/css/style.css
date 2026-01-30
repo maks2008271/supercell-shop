@@ -532,12 +532,16 @@ body {
 
 .contact-buttons {
     display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
     gap: 10px;
     margin-bottom: 12px;
 }
 
 .contact-btn {
-    flex: 1;
+    flex: 1 1 calc(50% - 5px);
+    min-width: 140px;
+    max-width: 100%;
     display: flex;
     align-items: center;
     gap: 8px;
@@ -551,6 +555,14 @@ body {
     transition: all 0.3s ease;
     overflow: hidden;
     position: relative;
+}
+
+/* На широких экранах все 3 кнопки в ряд */
+@media (min-width: 480px) {
+    .contact-btn {
+        flex: 1 1 0;
+        min-width: 0;
+    }
 }
 
 .contact-btn::before {
