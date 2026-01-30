@@ -8,6 +8,19 @@ if (tg.expand) {
     tg.ready();
 }
 
+// iOS Safari fix: мягкая перерисовка при возвращении из свернутого состояния
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+        // Мягкий reflow без скрытия элементов
+        requestAnimationFrame(() => {
+            document.body.style.opacity = '0.99';
+            requestAnimationFrame(() => {
+                document.body.style.opacity = '1';
+            });
+        });
+    }
+});
+
 // API Base URL
 const API_URL = window.location.origin + '/api';
 
