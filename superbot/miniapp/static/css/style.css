@@ -937,14 +937,9 @@ body {
 
 .product-image {
     position: relative;
-    aspect-ratio: 1;
+    aspect-ratio: 16/9;
     overflow: hidden;
     background: linear-gradient(135deg, rgba(255,255,255,0.04), rgba(255,255,255,0.01));
-}
-
-/* Clash Royale товары отображаются в формате 16:9 */
-.product-card[data-game="clashroyale"] .product-image {
-    aspect-ratio: 16/9;
 }
 
 .product-image img {
@@ -2284,9 +2279,9 @@ body {
 }
 
 .products-grid.list-view .product-image {
-    width: 100px;
-    height: 100px;
-    aspect-ratio: 1;
+    width: 120px;
+    height: 68px;
+    aspect-ratio: 16/9;
     flex-shrink: 0;
     border-radius: 12px 0 0 12px;
     order: 1;
