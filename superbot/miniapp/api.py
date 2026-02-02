@@ -702,6 +702,25 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 MINIAPP_BASE_URL = os.getenv("WEBHOOK_BASE_URL", "https://supercellshop.xyz")
 
 
+@app.get("/api/wata-status")
+async def wata_status():
+    """
+    Диагностика конфигурации wata.pro.
+    Проверяет наличие токена и настройки.
+    """
+    token = WATA_API_TOKEN
+    token_set = bool(token and token != "ВСТАВЬ_ТОКЕН_СЮДА" and len(token) > 20)
+
+    return {
+        "token_configured": token_set,
+        "token_length": len(token) if token else 0,
+        "token_preview": f"{token[:20]}..." if token and len(token) > 20 else "(not set or invalid)",
+        "sandbox_mode": os.getenv("WATA_SANDBOX", "false"),
+        "webhook_base_url": os.getenv("WEBHOOK_BASE_URL", "not set"),
+        "api_base": "https://api-sandbox.wata.pro" if os.getenv("WATA_SANDBOX", "false").lower() == "true" else "https://api.wata.pro"
+    }
+
+
 class CreatePaymentRequest(BaseModel):
     """Запрос на создание платежа"""
     order_id: int
