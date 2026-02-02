@@ -49,7 +49,8 @@ from database import (
     update_order_payment_status,
     save_payment_transaction,
     get_order_by_transaction_id,
-    get_user_orders
+    get_user_orders,
+    get_order_by_id
 )
 from config import BOT_TOKEN, ADMIN_IDS, SUPPORT_URL
 
@@ -680,14 +681,25 @@ async def purchase_product(
 
 
 # ============================================
-# ИНТЕГРАЦИЯ WATA.PRO ДЛЯ СБП ОПЛАТЫ
+# ИНТЕГРАЦИЯ WATA.PRO — PAYMENT FORM (БЕЗ H2H API)
+# ============================================
+#
+# ВАЖНО: H2H API недоступен, webhooks не работают.
+# Используем ТОЛЬКО редирект на платёжную форму.
+# Подтверждение оплаты — через админа вручную.
+#
 # ============================================
 
-# Импорт модуля оплаты (раскомментировать когда будет API токен)
-from wata_payment import WataPaymentClient, PaymentStatus
+from wata_form import (
+    create_payment_form_url_async,
+    WATA_API_TOKEN,
+    PaymentStatus,
+    verify_webhook_signature
+)
+from fastapi.responses import HTMLResponse, RedirectResponse
 
-# Инициализация клиента (раскомментировать когда будет API токен)
-wata_client = WataPaymentClient()
+# URL для возврата в Mini App
+MINIAPP_BASE_URL = os.getenv("WEBHOOK_BASE_URL", "https://supercellshop.xyz")
 
 
 class CreatePaymentRequest(BaseModel):
@@ -702,6 +714,11 @@ async def create_sbp_payment(
     request: Request,
     x_telegram_init_data: str = Header(None, alias="X-Telegram-Init-Data")
 ):
+    """
+    Создаёт ссылку на платёжную форму wata.pro.
+
+    БЕЗ H2H API — просто генерируем URL для редиректа.
+    """
     # Проверка Telegram
     if not x_telegram_init_data:
         raise HTTPException(status_code=401, detail="Нет Telegram initData")
@@ -710,73 +727,298 @@ async def create_sbp_payment(
     if not user_data:
         raise HTTPException(status_code=401, detail="Неверная авторизация")
 
-    # ВАЖНО: берём сумму заказа
-    # если нет get_order_by_id — временно ставь тестовую сумму
-    amount = 100.00  # 🔥 ДЛЯ ТЕСТА
+    # Получаем заказ из БД
+    order = await get_order_by_id(request_data.order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="Заказ не найден")
 
-    user_ip = request.client.host if request.client else "127.0.0.1"
-    user_agent = request.headers.get("User-Agent", "")
+    # order: (id, user_id, product_id, product_name, amount, game, pickup_code, status, created_at)
+    order_id = order[0]
+    amount = order[4]
+    product_name = order[3] or "Товар"
 
-    result = await wata_client.create_sbp_payment(
+    # Генерируем ссылку на платёжную форму через API wata.pro
+    result = await create_payment_form_url_async(
         amount=amount,
-        order_id=f"order_{request_data.order_id}",
-        description=f"Заказ #{request_data.order_id}",
-        user_ip=user_ip,
-        user_agent=user_agent
+        order_id=f"order_{order_id}",
+        description=f"Заказ #{order_id}: {product_name}"
     )
 
-    if result.success:
-        await save_payment_transaction(
-            request_data.order_id,
-            result.transaction_id
-        )
-
+    if not result.success:
+        logger.error(f"Failed to create payment URL: {result.error}")
         return {
-            "success": True,
-            "sbp_link": result.sbp_link,
-            "qr_code_url": result.qr_code_url,
-            "transaction_id": result.transaction_id
+            "success": False,
+            "error": result.error or "Не удалось создать ссылку на оплату"
         }
 
+    logger.info(f"Payment URL created for order {order_id}: {result.payment_url[:50]}...")
+
+    # Обновляем статус заказа на "pending_payment"
+    await update_order_payment_status(order_id, "pending_payment")
+
     return {
-        "success": False,
-        "error": result.error_message
+        "success": True,
+        "payment_url": result.payment_url,  # Ссылка на форму wata.pro
+        "order_id": order_id
     }
 
 
+# ============================================
+# SUCCESS / FAIL PAGES
+# ============================================
+# В ЛК wata.pro указываем простые URL без параметров:
+# Success Page: https://supercellshop.xyz/payment/success
+# Fail Page: https://supercellshop.xyz/payment/fail
+#
+# Wata.pro сам добавит параметры при редиректе (orderId, transactionId и т.д.)
+# ============================================
+
+@app.get("/payment/success")
+async def payment_success(
+    orderId: str = None,
+    order_id: str = None,
+    transactionId: str = None,
+    amount: float = None
+):
+    """
+    Страница успешной оплаты.
+
+    Wata.pro редиректит сюда после успешной оплаты.
+    Параметры могут быть: orderId, transactionId, amount
+    """
+    # Пробуем получить order_id из разных параметров
+    order_id_value = orderId or order_id
+
+    logger.info(f"Payment success page: orderId={orderId}, order_id={order_id}, transactionId={transactionId}")
+
+    # Извлекаем числовой order_id
+    numeric_order_id = None
+    if order_id_value:
+        if order_id_value.startswith("order_"):
+            try:
+                numeric_order_id = int(order_id_value.replace("order_", ""))
+            except ValueError:
+                pass
+        else:
+            try:
+                numeric_order_id = int(order_id_value)
+            except ValueError:
+                pass
+
+    # Если есть order_id - обновляем статус (на случай если webhook не дошёл)
+    if numeric_order_id:
+        order = await get_order_by_id(numeric_order_id)
+        if order and order[7] == "pending_payment":  # status в позиции 7
+            # Статус ещё не обновлён webhook'ом - ставим "awaiting_confirmation"
+            await update_order_payment_status(numeric_order_id, "awaiting_confirmation")
+            logger.info(f"Order {numeric_order_id} marked as awaiting_confirmation from success page")
+
+    html = f"""
+    <!DOCTYPE html>
+    <html lang="ru">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Оплата успешна</title>
+        <style>
+            * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+            body {{
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+                min-height: 100vh;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 20px;
+                color: white;
+            }}
+            .container {{
+                background: rgba(255,255,255,0.1);
+                border-radius: 20px;
+                padding: 40px 30px;
+                max-width: 400px;
+                width: 100%;
+                text-align: center;
+                backdrop-filter: blur(10px);
+                border: 1px solid rgba(255,255,255,0.2);
+            }}
+            .icon {{ font-size: 64px; margin-bottom: 20px; }}
+            h1 {{ font-size: 24px; margin-bottom: 15px; color: #10b981; }}
+            .info {{
+                color: rgba(255,255,255,0.8);
+                margin-bottom: 25px;
+                font-size: 15px;
+                line-height: 1.5;
+            }}
+            .order-id {{
+                background: rgba(255,255,255,0.1);
+                padding: 12px 20px;
+                border-radius: 10px;
+                margin-bottom: 25px;
+                font-family: monospace;
+                font-size: 14px;
+            }}
+            .btn {{
+                display: inline-block;
+                padding: 14px 28px;
+                background: linear-gradient(135deg, #3b82f6, #2563eb);
+                border: none;
+                border-radius: 12px;
+                color: white;
+                font-size: 16px;
+                font-weight: 600;
+                text-decoration: none;
+                transition: transform 0.2s;
+            }}
+            .btn:hover {{ transform: scale(1.02); }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="icon">✅</div>
+            <h1>Оплата получена!</h1>
+            <p class="info">
+                Ваш платёж успешно обработан.<br>
+                Вы получите уведомление в Telegram.
+            </p>
+            {"<div class='order-id'>Заказ: #" + str(numeric_order_id) + "</div>" if numeric_order_id else ""}
+            <a href="https://t.me" class="btn">Вернуться в Telegram</a>
+        </div>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html)
+
+
+@app.get("/payment/fail")
+async def payment_fail(
+    orderId: str = None,
+    order_id: str = None,
+    error: str = None
+):
+    """
+    Страница неуспешной оплаты.
+    """
+    order_id_value = orderId or order_id
+
+    logger.info(f"Payment fail page: orderId={orderId}, order_id={order_id}, error={error}")
+
+    # Извлекаем числовой order_id
+    numeric_order_id = None
+    if order_id_value:
+        if order_id_value.startswith("order_"):
+            try:
+                numeric_order_id = int(order_id_value.replace("order_", ""))
+            except ValueError:
+                pass
+        else:
+            try:
+                numeric_order_id = int(order_id_value)
+            except ValueError:
+                pass
+
+    # Обновляем статус заказа
+    if numeric_order_id:
+        await update_order_payment_status(numeric_order_id, "payment_failed")
+
+    html = f"""
+    <!DOCTYPE html>
+    <html lang="ru">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Оплата не прошла</title>
+        <style>
+            * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+            body {{
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+                min-height: 100vh;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 20px;
+                color: white;
+            }}
+            .container {{
+                background: rgba(255,255,255,0.1);
+                border-radius: 20px;
+                padding: 40px 30px;
+                max-width: 400px;
+                width: 100%;
+                text-align: center;
+                backdrop-filter: blur(10px);
+                border: 1px solid rgba(255,255,255,0.2);
+            }}
+            .icon {{ font-size: 64px; margin-bottom: 20px; }}
+            h1 {{ font-size: 24px; margin-bottom: 15px; color: #ef4444; }}
+            .info {{
+                color: rgba(255,255,255,0.8);
+                margin-bottom: 25px;
+                font-size: 15px;
+                line-height: 1.5;
+            }}
+            .btn {{
+                display: inline-block;
+                padding: 14px 28px;
+                background: linear-gradient(135deg, #3b82f6, #2563eb);
+                border: none;
+                border-radius: 12px;
+                color: white;
+                font-size: 16px;
+                font-weight: 600;
+                text-decoration: none;
+                transition: transform 0.2s;
+            }}
+            .btn:hover {{ transform: scale(1.02); }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="icon">❌</div>
+            <h1>Оплата не прошла</h1>
+            <p class="info">
+                К сожалению, платёж не был завершён.<br>
+                Вы можете попробовать ещё раз.
+            </p>
+            <a href="https://t.me" class="btn">Вернуться в Telegram</a>
+        </div>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html)
+
+
+# ============================================
+# WEBHOOK ОТ WATA.PRO
+# ============================================
+# URL настроен в ЛК wata.pro: https://supercellshop.xyz/webhook/wata
+# Wata.pro отправляет POST запрос когда платёж:
+# - Успешно завершён (status: Paid)
+# - Отклонён (status: Declined)
+# ============================================
 
 @app.post("/webhook/wata")
 async def wata_webhook(request: Request):
     """
-    Обработчик webhook'ов от wata.pro
+    Обработчик webhook'ов от wata.pro.
 
-    wata.pro отправляет POST запрос на этот URL когда:
-    - Платёж успешно завершён (status: Paid)
-    - Платёж отклонён (status: Declined)
-
-    ВАЖНО:
-    1. Этот URL должен быть публично доступен (настройте ngrok или реальный домен)
-    2. Зарегистрируйте URL в личном кабинете wata.pro
-    3. Проверяйте подпись X-Signature для безопасности
-
-    При успешной оплате:
-    - Обновляем статус заказа на "paid"
-    - Отправляем уведомление админу
-    - Отправляем уведомление пользователю
+    Wata.pro отправляет уведомление когда статус платежа меняется.
+    Это РЕАЛЬНОЕ подтверждение оплаты (в отличие от redirect на success_url).
     """
-
     # Получаем подпись из заголовка
     signature = request.headers.get("X-Signature", "")
 
     # Получаем тело запроса
     body = await request.body()
 
-    # TODO: Проверка подписи (раскомментировать когда будет публичный ключ)
-    # from wata_payment import verify_webhook_signature
-    # PUBLIC_KEY = "..."  # Получить через GET /public-key
-    # if not verify_webhook_signature(body, signature, PUBLIC_KEY):
-    #     logger.warning("Invalid webhook signature!")
-    #     raise HTTPException(status_code=401, detail="Invalid signature")
+    logger.info(f"Webhook received from wata.pro, body length: {len(body)}")
+
+    # Проверяем подпись (опционально)
+    if signature and not verify_webhook_signature(body, signature):
+        logger.warning("Invalid webhook signature!")
+        # Пока не блокируем, но логируем
+        # raise HTTPException(status_code=401, detail="Invalid signature")
 
     try:
         data = await request.json()
@@ -784,6 +1026,7 @@ async def wata_webhook(request: Request):
         logger.error(f"Failed to parse webhook JSON: {e}")
         raise HTTPException(status_code=400, detail="Invalid JSON")
 
+    # Извлекаем данные из webhook
     transaction_id = data.get("transactionId")
     status = data.get("status")
     order_id_str = data.get("orderId", "")  # Формат: "order_123"
@@ -792,61 +1035,115 @@ async def wata_webhook(request: Request):
     logger.info(f"Wata webhook: transaction={transaction_id}, status={status}, order={order_id_str}, amount={amount}")
 
     # Извлекаем числовой order_id
-    order_id = None
-    if order_id_str and order_id_str.startswith("order_"):
+    numeric_order_id = None
+    if order_id_str:
+        if order_id_str.startswith("order_"):
+            try:
+                numeric_order_id = int(order_id_str.replace("order_", ""))
+            except ValueError:
+                pass
+        else:
+            try:
+                numeric_order_id = int(order_id_str)
+            except ValueError:
+                pass
+
+    if not numeric_order_id:
+        logger.error(f"Could not parse order_id from webhook: {order_id_str}")
+        return {"status": "ok", "message": "order_id not parsed"}
+
+    # Получаем заказ из БД
+    order = await get_order_by_id(numeric_order_id)
+    if not order:
+        logger.error(f"Order {numeric_order_id} not found")
+        return {"status": "ok", "message": "order not found"}
+
+    # order: (id, user_id, product_id, product_name, amount, game, pickup_code, status, ...)
+    user_id = order[1]
+    product_name = order[3] or "Товар"
+    pickup_code = order[6]
+
+    if status == PaymentStatus.PAID:
+        logger.info(f"Payment CONFIRMED for order {numeric_order_id}")
+
+        # Обновляем статус заказа на "paid"
+        await update_order_payment_status(numeric_order_id, "paid")
+
+        # Сохраняем transaction_id если есть
+        if transaction_id:
+            await save_payment_transaction(numeric_order_id, transaction_id)
+
+        # Уведомляем пользователя об успешной оплате
         try:
-            order_id = int(order_id_str.replace("order_", ""))
-        except ValueError:
-            pass
+            user_message = (
+                f"✅ <b>Оплата получена!</b>\n\n"
+                f"📦 Товар: {product_name}\n"
+                f"🔑 Код получения: <code>{pickup_code}</code>\n\n"
+                f"Администратор обработает ваш заказ в ближайшее время.\n"
+                f"Вы получите уведомление когда товар будет готов."
+            )
+            await send_telegram_message(user_id, user_message)
+            logger.info(f"Payment notification sent to user {user_id}")
+        except Exception as e:
+            logger.error(f"Failed to notify user {user_id}: {e}")
 
-    if status == "Paid":
-        logger.info(f"Payment successful for order {order_id}")
+        # Уведомляем админов
+        try:
+            user_uid = await get_user_uid(user_id)
+            admin_message = (
+                f"💰 <b>ОПЛАТА ПОЛУЧЕНА!</b>\n\n"
+                f"📦 Заказ: #{numeric_order_id}\n"
+                f"📦 Товар: {product_name}\n"
+                f"💰 Сумма: {amount} ₽\n"
+                f"👤 Покупатель: UID #{user_uid}\n"
+                f"🔑 Код получения: {pickup_code}\n"
+                f"🆔 Transaction: {transaction_id or 'N/A'}"
+            )
+            reply_markup = {
+                "inline_keyboard": [
+                    [{"text": "👤 Перейти к пользователю", "callback_data": f"admin_goto_user_{user_id}"}],
+                    [
+                        {"text": "✅ Выполнен", "callback_data": f"admin_confirm_order_{numeric_order_id}"},
+                        {"text": "❌ Отменить", "callback_data": f"admin_cancel_order_{numeric_order_id}"}
+                    ]
+                ]
+            }
+            for admin_id in ADMIN_IDS:
+                await send_telegram_message(admin_id, admin_message, reply_markup)
+            logger.info(f"Admin notifications sent for paid order {numeric_order_id}")
+        except Exception as e:
+            logger.error(f"Failed to notify admins: {e}")
 
-        # TODO: Обновить статус заказа в базе
-        # await update_order_status(order_id, "paid")
+    elif status == PaymentStatus.DECLINED:
+        logger.warning(f"Payment DECLINED for order {numeric_order_id}")
 
-        # TODO: Отправить уведомление админам
-        # await notify_admins_about_payment(order_id)
+        # Обновляем статус заказа
+        await update_order_payment_status(numeric_order_id, "payment_failed")
 
-        # TODO: Отправить уведомление пользователю
-        # await notify_user_payment_success(order_id)
+        # Уведомляем пользователя
+        try:
+            user_message = (
+                f"❌ <b>Оплата отклонена</b>\n\n"
+                f"К сожалению, платёж за заказ #{numeric_order_id} не прошёл.\n"
+                f"Вы можете попробовать оплатить ещё раз."
+            )
+            await send_telegram_message(user_id, user_message)
+        except Exception as e:
+            logger.error(f"Failed to notify user about declined payment: {e}")
 
-    elif status == "Declined":
-        logger.warning(f"Payment declined for order {order_id}")
+    elif status == PaymentStatus.PENDING:
+        logger.info(f"Payment PENDING for order {numeric_order_id}")
+        # Ничего не делаем, ждём финального статуса
 
-        # TODO: Обновить статус заказа
-        # await update_order_status(order_id, "payment_failed")
+    else:
+        logger.warning(f"Unknown payment status: {status}")
 
-    # ВАЖНО: Вернуть 200 OK, иначе wata.pro будет повторять запросы 16 часов
+    # ВАЖНО: Вернуть 200 OK, иначе wata.pro будет повторять запросы
     return {"status": "ok"}
 
 
-@app.get("/payment/success")
-async def payment_success():
-    """
-    Страница успешной оплаты
-
-    Сюда редиректит wata.pro после успешной оплаты.
-    В реальном приложении можно показать красивую страницу
-    или редиректить обратно в Mini App.
-    """
-    return {
-        "status": "success",
-        "message": "Оплата прошла успешно! Вернитесь в Telegram."
-    }
-
-
-@app.get("/payment/fail")
-async def payment_fail():
-    """Страница неудачной оплаты"""
-    return {
-        "status": "failed",
-        "message": "Оплата не прошла. Попробуйте ещё раз."
-    }
-
-
 # ============================================
-# КОНЕЦ БЛОКА WATA.PRO
+# КОНЕЦ БЛОКА WATA.PRO PAYMENT
 # ============================================
 
 

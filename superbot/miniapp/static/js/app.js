@@ -371,6 +371,7 @@ async function completeOrder() {
     console.log('Starting purchase...', {userId, productId: currentProduct.id, supercellId: currentSupercellId});
 
     try {
+        // Шаг 1: Создаём заказ
         const response = await fetch(`${API_URL}/purchase`, {
             method: 'POST',
             headers: getAuthHeaders(),
@@ -388,33 +389,70 @@ async function completeOrder() {
 
         // Проверяем HTTP статус
         if (!response.ok) {
-            // Ошибка от сервера (401, 403, etc)
             const errorMsg = result.detail || result.message || 'Ошибка сервера';
             console.log('Server error:', errorMsg);
             showToast(errorMsg, 'error');
             return;
         }
 
-        if (result.success) {
-            console.log('Purchase successful, showing success modal');
+        if (!result.success) {
+            console.log('Purchase failed:', result.message);
+            showToast(result.message || 'Ошибка при оформлении заказа', 'error');
+            return;
+        }
 
-            // Сохраняем данные ДО закрытия модала (closeProductModal очищает currentProduct)
+        console.log('Order created:', result.order_id);
+
+        // Шаг 2: Получаем ссылку на оплату
+        const paymentResponse = await fetch(`${API_URL}/create-sbp-payment`, {
+            method: 'POST',
+            headers: getAuthHeaders(),
+            body: JSON.stringify({
+                order_id: result.order_id,
+                user_id: userId
+            })
+        });
+
+        const paymentResult = await paymentResponse.json();
+        console.log('Payment result:', paymentResult);
+
+        if (paymentResult.success && paymentResult.payment_url) {
+            // Сохраняем данные для показа после возврата
+            const productName = currentProduct.name;
+            const productPrice = currentProduct.price;
+            const scId = currentSupercellId;
+            const pickupCode = result.pickup_code;
+
+            // Закрываем модальное окно
+            closeProductModal();
+
+            // Показываем сообщение перед редиректом
+            showToast('Переход на страницу оплаты...', 'info');
+
+            // Редирект на платёжную форму wata.pro
+            // Используем location.href для полного редиректа
+            setTimeout(() => {
+                window.location.href = paymentResult.payment_url;
+            }, 500);
+
+        } else {
+            // Нет платёжной ссылки — показываем success с кодом
+            // (fallback для случая когда wata.pro не настроен)
+            console.log('No payment URL, showing success modal');
+
             const productName = currentProduct.name;
             const productPrice = currentProduct.price;
             const scId = currentSupercellId;
 
-            // Закрываем модальное окно покупки
             closeProductModal();
-
-            // Показываем success модальное окно
             showSuccessModal(result.pickup_code, productName, productPrice, scId);
 
-            // Обновляем профиль в фоне (не блокируем показ success)
+            // Показываем предупреждение
+            showToast(paymentResult.error || 'Заказ создан. Свяжитесь с поддержкой для оплаты.', 'warning');
+
             loadUserProfile().catch(err => console.error('Error updating profile:', err));
-        } else {
-            console.log('Purchase failed:', result.message);
-            showToast(result.message || 'Ошибка при оформлении заказа', 'error');
         }
+
     } catch (error) {
         console.error('Error completing order:', error);
         showToast('Ошибка при оформлении заказа', 'error');
