@@ -12,6 +12,9 @@ from config import BOT_TOKEN
 from database import init_db, get_or_create_user, register_referral_visit, get_referral_link_by_code
 from keyboards import get_main_menu, get_back_to_menu
 from handlers import profile, support, reviews, products, shop, news, categories, admin, purchase, orders_admin, miniapp
+from miniapp.wata_payment import WataPaymentClient
+
+
 
 # Получаем путь к директории, где находится этот файл
 BASE_DIR = Path(__file__).parent

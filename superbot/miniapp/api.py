@@ -684,10 +684,10 @@ async def purchase_product(
 # ============================================
 
 # Импорт модуля оплаты (раскомментировать когда будет API токен)
-# from wata_payment import WataPaymentClient, PaymentStatus
+from wata_payment import WataPaymentClient, PaymentStatus
 
 # Инициализация клиента (раскомментировать когда будет API токен)
-# wata_client = WataPaymentClient()
+wata_client = WataPaymentClient()
 
 
 class CreatePaymentRequest(BaseModel):
@@ -702,75 +702,47 @@ async def create_sbp_payment(
     request: Request,
     x_telegram_init_data: str = Header(None, alias="X-Telegram-Init-Data")
 ):
-    """
-    Создаёт СБП платёж для заказа через wata.pro
-
-    ЭТОТ ЭНДПОИНТ ТРЕБУЕТ НАСТРОЙКИ:
-    1. Получить API токен от wata.pro
-    2. Добавить WATA_API_TOKEN в .env
-    3. Раскомментировать импорт и инициализацию WataPaymentClient выше
-
-    Flow:
-    1. Mini App вызывает этот эндпоинт с order_id
-    2. Сервер создаёт платёж в wata.pro
-    3. Возвращается ссылка sbp_link для оплаты
-    4. Mini App открывает эту ссылку (редирект в банковское приложение)
-    5. После оплаты wata.pro отправляет webhook на /webhook/wata
-    """
-    # Проверяем авторизацию
+    # Проверка Telegram
     if not x_telegram_init_data:
-        raise HTTPException(status_code=401, detail="Требуется авторизация через Telegram")
+        raise HTTPException(status_code=401, detail="Нет Telegram initData")
 
     user_data = validate_telegram_init_data(x_telegram_init_data)
     if not user_data:
-        raise HTTPException(status_code=401, detail="Неверная авторизация Telegram")
+        raise HTTPException(status_code=401, detail="Неверная авторизация")
 
-    # Получаем информацию о заказе из базы
-    # TODO: Добавить функцию get_order_by_id в database.py
-    # order = await get_order_by_id(request_data.order_id)
-    # if not order:
-    #     raise HTTPException(status_code=404, detail="Заказ не найден")
+    # ВАЖНО: берём сумму заказа
+    # если нет get_order_by_id — временно ставь тестовую сумму
+    amount = 100.00  # 🔥 ДЛЯ ТЕСТА
 
-    # Получаем IP пользователя для wata.pro
     user_ip = request.client.host if request.client else "127.0.0.1"
     user_agent = request.headers.get("User-Agent", "")
 
-    # ===========================================
-    # ВРЕМЕННАЯ ЗАГЛУШКА - ЗАМЕНИТЕ НА РЕАЛЬНЫЙ КОД
-    # ===========================================
-    #
-    # Раскомментируйте этот код когда получите API токен от wata.pro:
-    #
-    # result = await wata_client.create_sbp_payment(
-    #     amount=order['price'],
-    #     order_id=f"order_{request_data.order_id}",
-    #     description=f"Заказ #{request_data.order_id}",
-    #     user_ip=user_ip,
-    #     user_agent=user_agent
-    # )
-    #
-    # if result.success:
-    #     # Сохраняем transaction_id в базу для отслеживания
-    #     # await save_payment_transaction(request_data.order_id, result.transaction_id)
-    #
-    #     return {
-    #         "success": True,
-    #         "sbp_link": result.sbp_link,
-    #         "qr_code_url": result.qr_code_url,
-    #         "transaction_id": result.transaction_id
-    #     }
-    # else:
-    #     return {
-    #         "success": False,
-    #         "error": result.error_message
-    #     }
+    result = await wata_client.create_sbp_payment(
+        amount=amount,
+        order_id=f"order_{request_data.order_id}",
+        description=f"Заказ #{request_data.order_id}",
+        user_ip=user_ip,
+        user_agent=user_agent
+    )
 
-    # Заглушка - вернуть ошибку пока не настроен API токен
-    logger.warning("wata.pro API не настроен! Платёж не создан.")
+    if result.success:
+        await save_payment_transaction(
+            request_data.order_id,
+            result.transaction_id
+        )
+
+        return {
+            "success": True,
+            "sbp_link": result.sbp_link,
+            "qr_code_url": result.qr_code_url,
+            "transaction_id": result.transaction_id
+        }
+
     return {
         "success": False,
-        "error": "Платёжная система не настроена. Обратитесь к администратору."
+        "error": result.error_message
     }
+
 
 
 @app.post("/webhook/wata")
