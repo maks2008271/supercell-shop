@@ -652,31 +652,21 @@ async def purchase_product(
             "message": message
         }
 
-    # Получаем информацию о товаре для уведомлений
-    product = await get_product_by_id(request.product_id)
-    product_name = product[1] if product else "Неизвестный товар"
-    price = product[3] if product else 0
+    # Сразу устанавливаем статус "pending_payment" - ожидает оплаты
+    await update_order_payment_status(order_id, "pending_payment")
+    logger.info(f"Order {order_id} created with status pending_payment")
 
-    # Отправляем уведомления
-    try:
-        # Уведомление пользователю
-        await notify_user_about_purchase(request.user_id, product_name, pickup_code)
-        logger.info(f"User notification sent to {request.user_id}")
-
-        # Уведомление администраторам
-        await notify_admins_about_order(
-            request.user_id, order_id, pickup_code,
-            product_name, price, request.supercell_id
-        )
-        logger.info(f"Admin notifications sent for order {order_id}")
-    except Exception as e:
-        logger.error(f"Failed to send notifications: {e}", exc_info=True)
+    # ВАЖНО: Уведомления НЕ отправляются здесь!
+    # Они будут отправлены только после подтверждения оплаты через webhook
+    # или при ручном подтверждении админом.
+    # Код получения (pickup_code) также НЕ показывается до оплаты.
 
     return {
         "success": True,
-        "message": message,
+        "message": "Заказ создан. Ожидает оплаты.",
         "order_id": order_id,
-        "pickup_code": pickup_code
+        "payment_required": True
+        # pickup_code НЕ возвращаем - он будет отправлен после оплаты
     }
 
 
@@ -824,13 +814,12 @@ async def payment_success(
             except ValueError:
                 pass
 
-    # Если есть order_id - обновляем статус (на случай если webhook не дошёл)
+    # ВАЖНО: НЕ обновляем статус заказа здесь!
+    # Статус обновляется ТОЛЬКО через webhook от wata.pro
+    # Success page может быть открыта напрямую или без реальной оплаты
+    # Доверяем только webhook для подтверждения платежа
     if numeric_order_id:
-        order = await get_order_by_id(numeric_order_id)
-        if order and order[7] == "pending_payment":  # status в позиции 7
-            # Статус ещё не обновлён webhook'ом - ставим "awaiting_confirmation"
-            await update_order_payment_status(numeric_order_id, "awaiting_confirmation")
-            logger.info(f"Order {numeric_order_id} marked as awaiting_confirmation from success page")
+        logger.info(f"Success page visited for order {numeric_order_id} (status NOT changed, waiting for webhook)")
 
     html = f"""
     <!DOCTYPE html>
@@ -838,7 +827,7 @@ async def payment_success(
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Оплата успешна</title>
+        <title>Платёж обрабатывается</title>
         <style>
             * {{ margin: 0; padding: 0; box-sizing: border-box; }}
             body {{
@@ -862,7 +851,7 @@ async def payment_success(
                 border: 1px solid rgba(255,255,255,0.2);
             }}
             .icon {{ font-size: 64px; margin-bottom: 20px; }}
-            h1 {{ font-size: 24px; margin-bottom: 15px; color: #10b981; }}
+            h1 {{ font-size: 24px; margin-bottom: 15px; color: #f59e0b; }}
             .info {{
                 color: rgba(255,255,255,0.8);
                 margin-bottom: 25px;
@@ -894,11 +883,12 @@ async def payment_success(
     </head>
     <body>
         <div class="container">
-            <div class="icon">✅</div>
-            <h1>Оплата получена!</h1>
+            <div class="icon">⏳</div>
+            <h1>Платёж обрабатывается</h1>
             <p class="info">
-                Ваш платёж успешно обработан.<br>
-                Вы получите уведомление в Telegram.
+                Ваш платёж отправлен на проверку.<br>
+                После подтверждения оплаты вы получите<br>
+                <b>уведомление с кодом получения в Telegram</b>.
             </p>
             {"<div class='order-id'>Заказ: #" + str(numeric_order_id) + "</div>" if numeric_order_id else ""}
             <a href="https://t.me" class="btn">Вернуться в Telegram</a>
