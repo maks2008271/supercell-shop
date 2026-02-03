@@ -306,11 +306,13 @@ function openProductModal(product) {
     }
 
     // Очищаем форму
-    elements.supercellIdTextarea.value = '';
-    elements.supercellIdTextarea.classList.remove('input-error');
+    if (elements.supercellIdTextarea) {
+        elements.supercellIdTextarea.value = '';
+        elements.supercellIdTextarea.classList.remove('input-error');
+    }
     if (elements.emailError) elements.emailError.style.display = 'none';
     if (elements.emailHint) elements.emailHint.style.display = 'block';
-    elements.purchaseContinue.disabled = true;
+    if (elements.purchaseContinue) elements.purchaseContinue.disabled = true;
 
     // Показываем первый шаг
     showPurchaseStep(1);
@@ -339,6 +341,10 @@ function showPurchaseStep(step) {
 
 function goToPaymentStep() {
     // Получаем введенные данные
+    if (!elements.supercellIdTextarea) {
+        showToast('Ошибка формы', 'error');
+        return;
+    }
     currentSupercellId = elements.supercellIdTextarea.value.trim();
 
     if (!currentSupercellId) {
@@ -426,12 +432,6 @@ async function completeOrder() {
         console.log('Payment result:', paymentResult);
 
         if (paymentResult.success && paymentResult.payment_url) {
-            // Сохраняем данные для показа после возврата
-            const productName = currentProduct.name;
-            const productPrice = currentProduct.price;
-            const scId = currentSupercellId;
-            const pickupCode = result.pickup_code;
-
             // Закрываем модальное окно
             closeProductModal();
 
@@ -439,25 +439,19 @@ async function completeOrder() {
             showToast('Переход на страницу оплаты...', 'info');
 
             // Редирект на платёжную форму wata.pro
-            // Используем location.href для полного редиректа
             setTimeout(() => {
                 window.location.href = paymentResult.payment_url;
             }, 500);
 
         } else {
-            // Нет платёжной ссылки — показываем success с кодом
-            // (fallback для случая когда wata.pro не настроен)
-            console.log('No payment URL, showing success modal');
-
-            const productName = currentProduct.name;
-            const productPrice = currentProduct.price;
-            const scId = currentSupercellId;
+            // Нет платёжной ссылки — показываем сообщение об ожидании
+            // ВАЖНО: pickup_code НЕ показываем до оплаты!
+            console.log('No payment URL available');
 
             closeProductModal();
-            showSuccessModal(result.pickup_code, productName, productPrice, scId);
 
-            // Показываем предупреждение
-            showToast(paymentResult.error || 'Заказ создан. Свяжитесь с поддержкой для оплаты.', 'warning');
+            // Показываем предупреждение что заказ создан, но оплата не настроена
+            showToast(paymentResult.error || 'Заказ создан. Свяжитесь с поддержкой для оплаты.', 'info');
 
             loadUserProfile().catch(err => console.error('Error updating profile:', err));
         }
@@ -505,23 +499,27 @@ function isValidEmail(email) {
 }
 
 function updateEmailValidation() {
+    if (!elements.supercellIdTextarea) return;
+
     const email = elements.supercellIdTextarea.value.trim();
     const hasInput = email.length > 0;
     const isValid = isValidEmail(email);
 
     // Показываем/скрываем ошибку
     if (hasInput && !isValid) {
-        elements.emailError.style.display = 'block';
-        elements.emailHint.style.display = 'none';
+        if (elements.emailError) elements.emailError.style.display = 'block';
+        if (elements.emailHint) elements.emailHint.style.display = 'none';
         elements.supercellIdTextarea.classList.add('input-error');
     } else {
-        elements.emailError.style.display = 'none';
-        elements.emailHint.style.display = 'block';
+        if (elements.emailError) elements.emailError.style.display = 'none';
+        if (elements.emailHint) elements.emailHint.style.display = 'block';
         elements.supercellIdTextarea.classList.remove('input-error');
     }
 
     // Активируем кнопку только если email валиден
-    elements.purchaseContinue.disabled = !hasInput || !isValid;
+    if (elements.purchaseContinue) {
+        elements.purchaseContinue.disabled = !hasInput || !isValid;
+    }
 }
 
 // Alias для обратной совместимости
@@ -886,6 +884,9 @@ function displayOrders(orders) {
         'clashofclans': '⚔️'
     };
 
+    // БЕЗОПАСНОСТЬ: pickup_code показываем ТОЛЬКО для оплаченных заказов
+    const paidStatuses = ['paid', 'completed'];
+
     ordersList.innerHTML = orders.map(order => {
         const statusLabel = statusLabels[order.status] || order.status;
         const gameIcon = gameIcons[order.game] || '🎮';
@@ -893,6 +894,9 @@ function displayOrders(orders) {
             day: 'numeric',
             month: 'short'
         });
+
+        // Показываем код получения ТОЛЬКО для оплаченных заказов
+        const canShowPickupCode = order.pickup_code && paidStatuses.includes(order.status);
 
         return `
             <div class="order-card">
@@ -907,7 +911,7 @@ function displayOrders(orders) {
                         </svg>
                         <span class="order-price">${formatPrice(order.amount)}₽</span>
                     </div>
-                    ${order.pickup_code ? `
+                    ${canShowPickupCode ? `
                         <div class="order-detail">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>

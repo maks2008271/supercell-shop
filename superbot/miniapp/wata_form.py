@@ -237,19 +237,97 @@ class PaymentStatus:
 # ПРОВЕРКА ПОДПИСИ WEBHOOK
 # ============================================
 
+import base64
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.backends import default_backend
+from cryptography.exceptions import InvalidSignature
+
+# Кэш для публичного ключа wata.pro
+_wata_public_key = None
+_wata_public_key_fetched = False
+
+
+async def get_wata_public_key():
+    """Получает публичный ключ wata.pro для верификации webhook"""
+    global _wata_public_key, _wata_public_key_fetched
+
+    if _wata_public_key_fetched:
+        return _wata_public_key
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(f"{WATA_API_BASE}/api/h2h/public-key")
+
+            if response.status_code == 200:
+                data = response.json()
+                pem_key = data.get("publicKey") or data.get("key")
+
+                if pem_key:
+                    # Загружаем PEM ключ
+                    _wata_public_key = serialization.load_pem_public_key(
+                        pem_key.encode(),
+                        backend=default_backend()
+                    )
+                    logger.info("Wata.pro public key loaded successfully")
+
+        _wata_public_key_fetched = True
+        return _wata_public_key
+
+    except Exception as e:
+        logger.error(f"Failed to fetch wata.pro public key: {e}")
+        _wata_public_key_fetched = True
+        return None
+
+
 def verify_webhook_signature(body: bytes, signature: str) -> bool:
     """
     Проверяет подпись webhook'а от wata.pro.
-
     wata.pro подписывает webhooks RSA-SHA512.
-    Публичный ключ: GET https://api.wata.pro/api/h2h/public-key
 
-    TODO: Реализовать полную проверку подписи
+    Args:
+        body: Тело запроса (bytes)
+        signature: Base64-encoded подпись из заголовка X-Signature
+
+    Returns:
+        True если подпись валидна, False иначе
     """
     if not signature:
         logger.warning("No signature in webhook request")
-        return True  # Временно пропускаем
+        return False  # В production отклоняем без подписи
 
-    # TODO: Получить публичный ключ и проверить подпись
-    logger.warning("Webhook signature verification not fully implemented")
-    return True
+    if not _wata_public_key:
+        logger.warning("Wata.pro public key not available, skipping verification")
+        return True  # Если ключ недоступен, пропускаем (но логируем)
+
+    try:
+        # Декодируем подпись из base64
+        signature_bytes = base64.b64decode(signature)
+
+        # Верифицируем подпись RSA-SHA512
+        _wata_public_key.verify(
+            signature_bytes,
+            body,
+            padding.PKCS1v15(),
+            hashes.SHA512()
+        )
+
+        logger.debug("Webhook signature verified successfully")
+        return True
+
+    except InvalidSignature:
+        logger.warning("Invalid webhook signature")
+        return False
+    except Exception as e:
+        logger.error(f"Webhook signature verification error: {e}")
+        return False
+
+
+async def verify_webhook_signature_async(body: bytes, signature: str) -> bool:
+    """Async версия верификации с автоматической загрузкой ключа"""
+    global _wata_public_key
+
+    if not _wata_public_key:
+        await get_wata_public_key()
+
+    return verify_webhook_signature(body, signature)

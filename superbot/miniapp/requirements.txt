@@ -1,4 +1,19 @@
+# FastAPI и сервер
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
+
+# База данных
 aiosqlite==0.19.0
+
+# Валидация данных
 pydantic==2.5.0
+
+# HTTP клиенты
+httpx==0.25.2
+aiohttp==3.9.1
+
+# Безопасность - верификация webhook подписей
+cryptography==41.0.7
+
+# Production server (альтернатива uvicorn)
+gunicorn==21.2.0

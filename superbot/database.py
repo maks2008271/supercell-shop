@@ -67,7 +67,7 @@ async def get_db_pool():
 # Кэш для часто запрашиваемых данных
 _user_cache = {}
 _product_cache = {}
-_cache_ttl = 60  # Время жизни кэша в секундах
+_cache_ttl = 300  # Время жизни кэша в секундах (5 минут для production)
 
 
 async def init_db():
@@ -190,6 +190,34 @@ async def init_db():
 
         await db.commit()
 
+        # ============================================
+        # PRODUCTION INDEXES - добавляем индексы для оптимизации
+        # ============================================
+        indexes = [
+            # Индекс для быстрого поиска заказов по статусу
+            "CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)",
+            # Индекс для быстрого поиска заказов пользователя
+            "CREATE INDEX IF NOT EXISTS idx_orders_user_id ON orders(user_id)",
+            # Композитный индекс для фильтрации товаров
+            "CREATE INDEX IF NOT EXISTS idx_products_game_subcategory ON products(game, subcategory)",
+            # Индекс для поиска товаров в наличии
+            "CREATE INDEX IF NOT EXISTS idx_products_in_stock ON products(in_stock)",
+            # Индекс для реферальных визитов
+            "CREATE INDEX IF NOT EXISTS idx_referral_visits_code ON referral_visits(referral_code)",
+            # Индекс для поиска по дате создания заказа
+            "CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at)",
+            # Индекс для transaction_id (платежи)
+            "CREATE INDEX IF NOT EXISTS idx_orders_transaction_id ON orders(transaction_id)",
+        ]
+
+        for index_sql in indexes:
+            try:
+                await db.execute(index_sql)
+            except Exception:
+                pass  # Индекс уже существует
+
+        await db.commit()
+
 
 async def get_or_create_user(user_id: int, username: str = None, first_name: str = None):
     """Получить или создать пользователя (оптимизированная версия с пулом)"""
@@ -236,19 +264,27 @@ async def get_or_create_user(user_id: int, username: str = None, first_name: str
 
 
 async def get_user_uid(user_id: int) -> int:
-    """Получить UID пользователя"""
-    async with aiosqlite.connect(DB_NAME) as db:
+    """Получить UID пользователя (использует пул соединений)"""
+    pool = await get_db_pool()
+    db = await pool.get_connection()
+    try:
         async with db.execute("SELECT uid FROM users WHERE user_id = ?", (user_id,)) as cursor:
             result = await cursor.fetchone()
             return result[0] if result else None
+    finally:
+        await pool.return_connection(db)
 
 
 async def search_user_by_uid(uid: int):
-    """Найти пользователя по UID"""
-    async with aiosqlite.connect(DB_NAME) as db:
+    """Найти пользователя по UID (использует пул соединений)"""
+    pool = await get_db_pool()
+    db = await pool.get_connection()
+    try:
         cursor = await db.execute("SELECT user_id FROM users WHERE uid = ?", (uid,))
         result = await cursor.fetchone()
         return result[0] if result else None
+    finally:
+        await pool.return_connection(db)
 
 
 async def get_user_balance(user_id: int) -> float:
@@ -340,13 +376,20 @@ async def add_sample_products():
 
 
 async def update_user_balance(user_id: int, amount: float):
-    """Обновить баланс пользователя"""
-    async with aiosqlite.connect(DB_NAME) as db:
+    """Добавить сумму к балансу пользователя (использует пул соединений)"""
+    pool = await get_db_pool()
+    db = await pool.get_connection()
+    try:
         await db.execute(
             "UPDATE users SET balance = balance + ? WHERE user_id = ?",
             (amount, user_id)
         )
         await db.commit()
+        # Инвалидируем кэш пользователя
+        if user_id in _user_cache:
+            del _user_cache[user_id]
+    finally:
+        await pool.return_connection(db)
 
 
 async def get_product_by_id(product_id: int):
@@ -816,15 +859,21 @@ async def get_user_full_stats(user_id):
         }
 
 
-async def update_user_balance(user_id, new_balance):
-    """Обновить баланс пользователя"""
-    async with aiosqlite.connect(DB_NAME) as db:
-        await db.execute("""
-            UPDATE users
-            SET balance = ?
-            WHERE user_id = ?
-        """, (new_balance, user_id))
+async def set_user_balance(user_id: int, new_balance: float):
+    """Установить баланс пользователя (абсолютное значение)"""
+    pool = await get_db_pool()
+    db = await pool.get_connection()
+    try:
+        await db.execute(
+            "UPDATE users SET balance = ? WHERE user_id = ?",
+            (new_balance, user_id)
+        )
         await db.commit()
+        # Инвалидируем кэш пользователя
+        if user_id in _user_cache:
+            del _user_cache[user_id]
+    finally:
+        await pool.return_connection(db)
 
 
 async def add_to_user_balance(user_id, amount):

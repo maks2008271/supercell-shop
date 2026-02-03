@@ -5,10 +5,12 @@ FastAPI сервер для Mini App
 
 from fastapi import FastAPI, HTTPException, Request, Header
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, StreamingResponse
-from pydantic import BaseModel
+from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
+from pydantic import BaseModel, Field, field_validator
 from contextlib import asynccontextmanager
+import re
 import sys
 import os
 import aiohttp
@@ -23,10 +25,16 @@ from urllib.parse import parse_qsl, unquote
 
 ENABLE_PAYMENT_CHECKER = os.getenv("ENABLE_PAYMENT_CHECKER", "false").lower() == "true"
 
-# Настройка подробного логирования
+# Production режим - определяем по окружению
+IS_PRODUCTION = os.getenv("PRODUCTION", "false").lower() == "true"
+
+# Настройка логирования для production
+LOG_LEVEL = logging.INFO if IS_PRODUCTION else logging.DEBUG
+LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s'
+
 logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s',
+    level=LOG_LEVEL,
+    format=LOG_FORMAT,
     handlers=[
         logging.StreamHandler(),
         logging.FileHandler('/tmp/api_debug.log', encoding='utf-8')
@@ -272,12 +280,10 @@ def validate_telegram_init_data(init_data: str):
             hashlib.sha256
         ).hexdigest()
 
-        # Сравниваем хеши
+        # Сравниваем хеши - PRODUCTION: строгая проверка
         if not hmac.compare_digest(calculated_hash, received_hash):
-            logger.warning(f"Invalid hash: calculated {calculated_hash[:20]}..., received {received_hash[:20]}...")
-            # Для отладки - временно пропускаем проверку хеша, но логируем
-            # return None
-            logger.info("Hash validation skipped for debugging - allowing request")
+            logger.warning(f"Invalid Telegram hash: calculated {calculated_hash[:20]}..., received {received_hash[:20]}...")
+            return None  # ВАЖНО: В production отклоняем невалидные запросы
 
         # Парсим user из initData
         import json
@@ -400,20 +406,82 @@ async def security_middleware(request: Request, call_next):
         logger.error(f"✗ {request.method} {request.url.path} - Error: {e}", exc_info=True)
         raise
 
-# CORS middleware для разрешения запросов от Telegram
+# CORS middleware - PRODUCTION: ограничиваем origins
+# Разрешаем только Telegram Web App и наш домен
+ALLOWED_ORIGINS = [
+    "https://web.telegram.org",
+    "https://t.me",
+    "https://supercellshop.xyz",
+    "https://www.supercellshop.xyz",
+    # Для локальной разработки (убрать в production)
+    # "http://localhost:8000",
+    # "http://127.0.0.1:8000",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "X-Telegram-Init-Data", "Authorization"],
+    max_age=86400,  # Кэш preflight запросов на 24 часа
 )
 
-# Модели данных
+# GZip сжатие для ответов > 500 байт
+app.add_middleware(GZipMiddleware, minimum_size=500)
+
+
+# ============================================
+# ГЛОБАЛЬНЫЕ ОБРАБОТЧИКИ ОШИБОК
+# ============================================
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Глобальный обработчик необработанных исключений"""
+    logger.error(f"Unhandled exception: {exc}", exc_info=True)
+    # В production не раскрываем детали ошибки
+    error_message = "Внутренняя ошибка сервера" if IS_PRODUCTION else str(exc)
+    return JSONResponse(
+        status_code=500,
+        content={"error": error_message, "success": False}
+    )
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """Обработчик HTTP исключений"""
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error": exc.detail, "success": False}
+    )
+
+
+from pydantic import ValidationError
+
+@app.exception_handler(ValidationError)
+async def validation_exception_handler(request: Request, exc: ValidationError):
+    """Обработчик ошибок валидации Pydantic"""
+    logger.warning(f"Validation error: {exc}")
+    return JSONResponse(
+        status_code=422,
+        content={"error": "Ошибка валидации данных", "details": exc.errors(), "success": False}
+    )
+
+# Модели данных с валидацией
 class PurchaseRequest(BaseModel):
-    user_id: int
-    product_id: int
-    supercell_id: str
+    user_id: int = Field(..., gt=0, description="Telegram user ID")
+    product_id: int = Field(..., gt=0, description="Product ID")
+    supercell_id: str = Field(..., min_length=5, max_length=100, description="Supercell account email")
+
+    @field_validator('supercell_id')
+    @classmethod
+    def validate_email(cls, v: str) -> str:
+        # Проверка формата email
+        email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+        v = v.strip()
+        if not re.match(email_pattern, v):
+            raise ValueError('Некорректный формат email')
+        return v.lower()
 
 
 # ===== ROUTES =====
@@ -448,10 +516,24 @@ async def get_user(user_id: int):
 
 @app.get("/api/user/{user_id}/orders")
 async def get_user_orders_api(user_id: int, limit: int = 20):
-    """Получить историю заказов пользователя"""
+    """Получить историю заказов пользователя
+
+    ВАЖНО: pickup_code возвращается ТОЛЬКО для оплаченных заказов (paid, completed).
+    Для неоплаченных заказов pickup_code скрыт для предотвращения мошенничества.
+    """
     logger.debug(f"Getting orders for user_id: {user_id}")
     try:
         orders = await get_user_orders(user_id, limit)
+
+        # БЕЗОПАСНОСТЬ: Скрываем pickup_code для неоплаченных заказов
+        # Код получения показывается ТОЛЬКО после подтверждения оплаты
+        safe_statuses = ['paid', 'completed']
+
+        for order in orders:
+            if order.get('status') not in safe_statuses:
+                # Скрываем код для неоплаченных заказов
+                order['pickup_code'] = None
+
         logger.info(f"Found {len(orders)} orders for user {user_id}")
         return orders
     except Exception as e:
@@ -461,7 +543,18 @@ async def get_user_orders_api(user_id: int, limit: int = 20):
 
 @app.get("/api/search")
 async def search_products(q: str, game: str = None):
-    """Умный поиск товаров"""
+    """Умный поиск товаров с санитизацией входных данных"""
+    # SECURITY: Санитизация и ограничение длины запроса
+    q = q.strip()[:100]  # Максимум 100 символов
+    q = re.sub(r'[<>"\';\\]', '', q)  # Удаляем опасные символы
+
+    if game:
+        game = game.strip()[:50]
+        # Валидация game - только разрешённые значения
+        allowed_games = ['brawlstars', 'clashroyale', 'clashofclans']
+        if game not in allowed_games:
+            game = None
+
     logger.debug(f"Search query: '{q}', game: {game}")
 
     if len(q) < 2:
@@ -684,7 +777,6 @@ from wata_form import (
     create_payment_form_url_async,
     WATA_API_TOKEN,
     PaymentStatus,
-    verify_webhook_signature
 )
 from fastapi.responses import HTMLResponse, RedirectResponse
 
@@ -705,8 +797,8 @@ async def wata_status():
         "token_configured": token_set,
         "token_length": len(token) if token else 0,
         "token_preview": f"{token[:20]}..." if token and len(token) > 20 else "(not set or invalid)",
-            "sandbox_mode": os.getenv("WATA_SANDBOX", "false"),
-            "webhook_base_url": os.getenv("WEBHOOK_BASE_URL", "not set"),
+        "sandbox_mode": os.getenv("WATA_SANDBOX", "false"),
+        "webhook_base_url": os.getenv("WEBHOOK_BASE_URL", "not set"),
         "api_base": "https://api-sandbox.wata.pro" if os.getenv("WATA_SANDBOX", "false").lower() == "true" else "https://api.wata.pro"
     }
 
@@ -1023,11 +1115,18 @@ async def wata_webhook(request: Request):
 
     logger.info(f"Webhook received from wata.pro, body length: {len(body)}")
 
-    # Проверяем подпись (опционально)
-    if signature and not verify_webhook_signature(body, signature):
-        logger.warning("Invalid webhook signature!")
-        # Пока не блокируем, но логируем
-        # raise HTTPException(status_code=401, detail="Invalid signature")
+    # PRODUCTION: Проверяем подпись webhook
+    from miniapp.wata_form import verify_webhook_signature_async
+    if IS_PRODUCTION:
+        is_valid = await verify_webhook_signature_async(body, signature)
+        if not is_valid:
+            logger.warning("Invalid webhook signature - rejecting request!")
+            raise HTTPException(status_code=401, detail="Invalid signature")
+    elif signature:
+        # В dev режиме логируем, но не блокируем
+        is_valid = await verify_webhook_signature_async(body, signature)
+        if not is_valid:
+            logger.warning("Invalid webhook signature (dev mode - allowing)")
 
     try:
         data = await request.json()
