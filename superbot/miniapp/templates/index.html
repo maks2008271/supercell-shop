@@ -288,11 +288,11 @@
 
                     <!-- Форма ввода -->
                     <div class="purchase-form">
-                        <label class="form-label">Ваша информация:<span class="required">*</span></label>
-                        <textarea class="form-textarea" id="supercellIdTextarea" placeholder="Напишите ваш Supercell ID" maxlength="200"></textarea>
+                        <label class="form-label">Email от Supercell ID:<span class="required">*</span></label>
+                        <input type="email" class="form-input" id="supercellIdTextarea" placeholder="example@mail.com" maxlength="100">
                         <div class="form-hint">
-                            <span>Обязательно</span>
-                            <span id="charCount">0/200</span>
+                            <span class="email-error" id="emailError" style="display: none; color: #ef4444;">Введите корректный email (например: example@mail.com)</span>
+                            <span id="emailHint">Почта, привязанная к вашему Supercell аккаунту</span>
                         </div>
                     </div>
                 </div>
@@ -328,7 +328,7 @@
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
                                 <path d="M9 12L11 14L15 10M21 12C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C16.9706 3 21 7.02944 21 12Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                             </svg>
-                            <span>Ваша информация</span>
+                            <span>Email от Supercell ID</span>
                         </div>
                         <div class="info-box-content">
                             <span id="userSupercellId">-</span>
@@ -408,7 +408,7 @@
                     <span class="detail-value" id="successPrice">0₽</span>
                 </div>
                 <div class="success-detail-row">
-                    <span class="detail-label">Supercell ID:</span>
+                    <span class="detail-label">Email:</span>
                     <span class="detail-value" id="successSupercellId">-</span>
                 </div>
             </div>
@@ -417,7 +417,7 @@
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
                     <path d="M21 15C21 15.5304 20.7893 16.0391 20.4142 16.4142C20.0391 16.7893 19.5304 17 19 17H7L3 21V5C3 4.46957 3.21071 3.96086 3.58579 3.58579C3.96086 3.21071 4.46957 3 5 3H19C19.5304 3 20.0391 3.21071 20.4142 3.58579C20.7893 3.96086 21 4.46957 21 5V15Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
-                <span>Мы отправили вам сообщение в бота с кодом получения. Перейдите туда для продолжения.</span>
+                <span>После подтверждения оплаты вы получите код получения в боте.</span>
             </div>
 
             <button class="success-btn" id="successCloseBtn">Перейти в бота</button>

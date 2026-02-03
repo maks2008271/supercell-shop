@@ -705,8 +705,8 @@ async def wata_status():
         "token_configured": token_set,
         "token_length": len(token) if token else 0,
         "token_preview": f"{token[:20]}..." if token and len(token) > 20 else "(not set or invalid)",
-        "sandbox_mode": os.getenv("WATA_SANDBOX", "false"),
-        "webhook_base_url": os.getenv("WEBHOOK_BASE_URL", "not set"),
+            "sandbox_mode": os.getenv("WATA_SANDBOX", "false"),
+            "webhook_base_url": os.getenv("WEBHOOK_BASE_URL", "not set"),
         "api_base": "https://api-sandbox.wata.pro" if os.getenv("WATA_SANDBOX", "false").lower() == "true" else "https://api.wata.pro"
     }
 

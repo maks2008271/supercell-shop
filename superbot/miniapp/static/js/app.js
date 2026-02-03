@@ -107,7 +107,8 @@ const elements = {
     purchasePrice2: document.getElementById('purchasePrice2'),
     purchaseDescription: document.getElementById('purchaseDescription'),
     supercellIdTextarea: document.getElementById('supercellIdTextarea'),
-    charCount: document.getElementById('charCount'),
+    emailError: document.getElementById('emailError'),
+    emailHint: document.getElementById('emailHint'),
     purchaseClose: document.getElementById('purchaseClose'),
     purchaseCancel: document.getElementById('purchaseCancel'),
     purchaseCancel2: document.getElementById('purchaseCancel2'),
@@ -306,7 +307,9 @@ function openProductModal(product) {
 
     // Очищаем форму
     elements.supercellIdTextarea.value = '';
-    elements.charCount.textContent = '0/200';
+    elements.supercellIdTextarea.classList.remove('input-error');
+    if (elements.emailError) elements.emailError.style.display = 'none';
+    if (elements.emailHint) elements.emailHint.style.display = 'block';
     elements.purchaseContinue.disabled = true;
 
     // Показываем первый шаг
@@ -339,7 +342,13 @@ function goToPaymentStep() {
     currentSupercellId = elements.supercellIdTextarea.value.trim();
 
     if (!currentSupercellId) {
-        showToast('Введите ваш Supercell ID', 'error');
+        showToast('Введите email от Supercell ID', 'error');
+        return;
+    }
+
+    // Проверяем валидность email
+    if (!isValidEmail(currentSupercellId)) {
+        showToast('Введите корректный email (например: example@mail.com)', 'error');
         return;
     }
 
@@ -489,13 +498,35 @@ function closeSuccessModal() {
     goHome();
 }
 
-function updateCharCount() {
-    const count = elements.supercellIdTextarea.value.length;
-    elements.charCount.textContent = `${count}/200`;
+function isValidEmail(email) {
+    // Простая проверка email: должен содержать @ и точку после @
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email);
+}
 
-    // Активируем кнопку если есть текст
-    const hasInput = elements.supercellIdTextarea.value.trim().length > 0;
-    elements.purchaseContinue.disabled = !hasInput;
+function updateEmailValidation() {
+    const email = elements.supercellIdTextarea.value.trim();
+    const hasInput = email.length > 0;
+    const isValid = isValidEmail(email);
+
+    // Показываем/скрываем ошибку
+    if (hasInput && !isValid) {
+        elements.emailError.style.display = 'block';
+        elements.emailHint.style.display = 'none';
+        elements.supercellIdTextarea.classList.add('input-error');
+    } else {
+        elements.emailError.style.display = 'none';
+        elements.emailHint.style.display = 'block';
+        elements.supercellIdTextarea.classList.remove('input-error');
+    }
+
+    // Активируем кнопку только если email валиден
+    elements.purchaseContinue.disabled = !hasInput || !isValid;
+}
+
+// Alias для обратной совместимости
+function updateCharCount() {
+    updateEmailValidation();
 }
 
 function togglePriceDetails() {
