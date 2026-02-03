@@ -436,11 +436,19 @@ async function completeOrder() {
             closeProductModal();
 
             // Показываем сообщение перед редиректом
-            showToast('Переход на страницу оплаты...', 'info');
+            showToast('Открываем страницу оплаты в браузере...', 'info');
 
-            // Редирект на платёжную форму wata.pro
+            // Открываем платёжную форму во ВНЕШНЕМ браузере
+            // Telegram WebView блокирует переходы в банковские приложения,
+            // поэтому используем tg.openLink() для открытия в системном браузере
             setTimeout(() => {
-                window.location.href = paymentResult.payment_url;
+                if (tg && tg.openLink) {
+                    // Открываем во внешнем браузере (не в WebView)
+                    tg.openLink(paymentResult.payment_url);
+                } else {
+                    // Fallback для случая когда tg.openLink недоступен
+                    window.open(paymentResult.payment_url, '_blank');
+                }
             }, 500);
 
         } else {
