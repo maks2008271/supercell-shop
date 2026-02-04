@@ -315,8 +315,6 @@ async def get_validated_user(x_telegram_init_data: str = Header(None, alias="X-T
 
 async def send_telegram_message(chat_id: int, text: str, reply_markup: dict = None):
     """Отправить сообщение через Telegram Bot API"""
-    import json as json_lib
-
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     payload = {
         "chat_id": chat_id,
@@ -324,17 +322,25 @@ async def send_telegram_message(chat_id: int, text: str, reply_markup: dict = No
         "parse_mode": "HTML"
     }
     if reply_markup:
-        # reply_markup должен быть JSON-строкой для Telegram API
-        payload["reply_markup"] = json_lib.dumps(reply_markup)
+        # При использовании json=payload, reply_markup передаётся как dict
+        # httpx автоматически сериализует всё в JSON
+        payload["reply_markup"] = reply_markup
+
+    logger.info(f"Sending Telegram message to {chat_id}, text length: {len(text)}")
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         try:
             response = await client.post(url, json=payload)
+            response_text = response.text[:500] if response.text else ""
+
             if response.status_code != 200:
-                logger.error(f"Telegram API error: {response.status_code} - {response.text}")
-            return response.status_code == 200
+                logger.error(f"Telegram API error: {response.status_code} - {response_text}")
+                return False
+
+            logger.info(f"Telegram message sent successfully to {chat_id}")
+            return True
         except Exception as e:
-            logger.error(f"Failed to send telegram message: {e}")
+            logger.error(f"Failed to send telegram message to {chat_id}: {e}")
             return False
 
 
@@ -1102,6 +1108,96 @@ async def payment_fail(
 # - Успешно завершён (status: Paid)
 # - Отклонён (status: Declined)
 # ============================================
+
+@app.get("/webhook/wata")
+async def wata_webhook_check():
+    """
+    GET endpoint для проверки доступности webhook URL.
+    Wata.pro может использовать для проверки что URL доступен.
+    """
+    logger.info("Webhook URL check (GET request)")
+    return {"status": "ok", "message": "Webhook endpoint is accessible", "method": "GET"}
+
+
+@app.get("/api/test-notification/{order_id}")
+async def test_notification(order_id: int, admin_key: str = None):
+    """
+    Тестовый endpoint для проверки отправки уведомлений.
+    Используется для диагностики - имитирует получение webhook.
+
+    ВНИМАНИЕ: Только для тестирования! Не меняет статус заказа.
+    """
+    # Простая защита - требуем ключ
+    expected_key = BOT_TOKEN[:10] if BOT_TOKEN else "test"
+    if admin_key != expected_key:
+        return {"error": "Invalid admin key", "hint": "Use first 10 chars of BOT_TOKEN"}
+
+    order = await get_order_by_id(order_id)
+    if not order:
+        return {"error": f"Order {order_id} not found"}
+
+    user_id = order[1]
+    product_name = order[3] or "Товар"
+    pickup_code = order[6]
+
+    # Тестовое сообщение пользователю
+    test_message = (
+        f"🔔 <b>ТЕСТОВОЕ УВЕДОМЛЕНИЕ</b>\n\n"
+        f"Это тест системы уведомлений.\n"
+        f"📦 Товар: {product_name}\n"
+        f"🔑 Код: {pickup_code}\n\n"
+        f"Если вы видите это сообщение - уведомления работают!"
+    )
+
+    user_result = await send_telegram_message(user_id, test_message)
+
+    # Тестовое сообщение админам
+    admin_results = []
+    for admin_id in ADMIN_IDS:
+        admin_msg = f"🔔 Тест уведомлений для заказа #{order_id}\nUser: {user_id}\nResult: {user_result}"
+        result = await send_telegram_message(admin_id, admin_msg)
+        admin_results.append({"admin_id": admin_id, "success": result})
+
+    return {
+        "status": "test_sent",
+        "order_id": order_id,
+        "user_id": user_id,
+        "user_notification": user_result,
+        "admin_notifications": admin_results,
+        "bot_token_set": bool(BOT_TOKEN),
+        "admin_ids": list(ADMIN_IDS)
+    }
+
+
+@app.get("/api/debug/logs")
+async def get_debug_logs(admin_key: str = None, lines: int = 100):
+    """
+    Просмотр последних логов API для диагностики.
+    Требует admin_key (первые 10 символов BOT_TOKEN).
+    """
+    expected_key = BOT_TOKEN[:10] if BOT_TOKEN else "test"
+    if admin_key != expected_key:
+        return {"error": "Invalid admin key"}
+
+    try:
+        with open('/tmp/api_debug.log', 'r', encoding='utf-8') as f:
+            all_lines = f.readlines()
+            # Возвращаем последние N строк
+            recent_lines = all_lines[-lines:] if len(all_lines) > lines else all_lines
+            # Фильтруем строки с webhook для удобства
+            webhook_lines = [l for l in recent_lines if 'webhook' in l.lower() or 'wata' in l.lower()]
+            return {
+                "total_lines": len(all_lines),
+                "returned_lines": len(recent_lines),
+                "webhook_related": len(webhook_lines),
+                "logs": recent_lines,
+                "webhook_logs": webhook_lines
+            }
+    except FileNotFoundError:
+        return {"error": "Log file not found", "path": "/tmp/api_debug.log"}
+    except Exception as e:
+        return {"error": str(e)}
+
 
 @app.post("/webhook/wata")
 async def wata_webhook(request: Request):
