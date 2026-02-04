@@ -1101,6 +1101,122 @@ async def payment_fail(
 
 
 # ============================================
+# ТЕСТИРОВАНИЕ БЕЗ РЕАЛЬНЫХ ПЛАТЕЖЕЙ
+# ============================================
+
+@app.get("/api/simulate-payment/{order_id}")
+async def simulate_payment(order_id: int, admin_key: str = None, status: str = "Paid"):
+    """
+    Симулирует webhook от wata.pro для тестирования БЕЗ реальных денег.
+
+    Использование:
+    GET /api/simulate-payment/123?admin_key=YOUR_KEY&status=Paid
+
+    status может быть: Paid, Declined, Pending
+    admin_key = первые 10 символов BOT_TOKEN
+    """
+    expected_key = BOT_TOKEN[:10] if BOT_TOKEN else "test"
+    if admin_key != expected_key:
+        return {
+            "error": "Invalid admin key",
+            "hint": "Use first 10 chars of BOT_TOKEN as admin_key",
+            "example": f"/api/simulate-payment/{order_id}?admin_key=YOUR_KEY&status=Paid"
+        }
+
+    # Проверяем что заказ существует
+    order = await get_order_by_id(order_id)
+    if not order:
+        return {"error": f"Order {order_id} not found"}
+
+    # Имитируем данные webhook
+    fake_webhook_data = {
+        "transactionId": f"TEST_{order_id}_{int(time.time())}",
+        "status": status,
+        "orderId": f"order_{order_id}",
+        "amount": order[4]  # amount из заказа
+    }
+
+    logger.info(f"🧪 SIMULATING webhook for order {order_id} with status={status}")
+    logger.info(f"Fake webhook data: {fake_webhook_data}")
+
+    # Извлекаем данные
+    transaction_id = fake_webhook_data["transactionId"]
+    order_id_str = fake_webhook_data["orderId"]
+    amount = fake_webhook_data["amount"]
+    status_normalized = status.lower()
+
+    # order: (id, user_id, product_id, product_name, amount, game, pickup_code, status, ...)
+    user_id = order[1]
+    product_name = order[3] or "Товар"
+    pickup_code = order[6]
+
+    results = {"order_id": order_id, "simulated_status": status, "actions": []}
+
+    if status_normalized == "paid":
+        # Обновляем статус заказа
+        await update_order_payment_status(order_id, "paid")
+        results["actions"].append("Order status updated to 'paid'")
+
+        # Сохраняем transaction_id
+        await save_payment_transaction(order_id, transaction_id)
+        results["actions"].append(f"Transaction saved: {transaction_id}")
+
+        # Уведомляем пользователя
+        user_message = (
+            f"✅ <b>Оплата получена!</b>\n\n"
+            f"📦 Товар: {product_name}\n"
+            f"🔑 Код получения: <code>{pickup_code}</code>\n\n"
+            f"Администратор обработает ваш заказ в ближайшее время.\n"
+            f"Вы получите уведомление когда товар будет готов."
+        )
+        user_result = await send_telegram_message(user_id, user_message)
+        results["actions"].append(f"User notification sent: {user_result}")
+        results["user_notified"] = user_result
+
+        # Уведомляем админов
+        user_uid = await get_user_uid(user_id)
+        admin_message = (
+            f"💰 <b>ОПЛАТА ПОЛУЧЕНА!</b> (ТЕСТ)\n\n"
+            f"📦 Заказ: #{order_id}\n"
+            f"📦 Товар: {product_name}\n"
+            f"💰 Сумма: {amount} ₽\n"
+            f"👤 Покупатель: UID #{user_uid}\n"
+            f"🔑 Код получения: {pickup_code}\n"
+            f"🆔 Transaction: {transaction_id}"
+        )
+        reply_markup = {
+            "inline_keyboard": [
+                [{"text": "👤 Перейти к пользователю", "callback_data": f"admin_goto_user_{user_id}"}],
+                [
+                    {"text": "✅ Выполнен", "callback_data": f"admin_confirm_order_{order_id}"},
+                    {"text": "❌ Отменить", "callback_data": f"admin_cancel_order_{order_id}"}
+                ]
+            ]
+        }
+        admin_results = []
+        for admin_id in ADMIN_IDS:
+            result = await send_telegram_message(admin_id, admin_message, reply_markup)
+            admin_results.append({"admin_id": admin_id, "success": result})
+        results["actions"].append(f"Admin notifications sent")
+        results["admin_notifications"] = admin_results
+
+    elif status_normalized == "declined":
+        await update_order_payment_status(order_id, "payment_failed")
+        results["actions"].append("Order status updated to 'payment_failed'")
+
+        user_message = (
+            f"❌ <b>Оплата отклонена</b> (ТЕСТ)\n\n"
+            f"К сожалению, платёж за заказ #{order_id} не прошёл.\n"
+            f"Вы можете попробовать оплатить ещё раз."
+        )
+        user_result = await send_telegram_message(user_id, user_message)
+        results["actions"].append(f"User notification sent: {user_result}")
+
+    results["success"] = True
+    return results
+
+
+# ============================================
 # WEBHOOK ОТ WATA.PRO
 # ============================================
 # URL настроен в ЛК wata.pro: https://supercellshop.xyz/webhook/wata
