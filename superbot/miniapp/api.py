@@ -1412,13 +1412,18 @@ async def wata_webhook(request: Request):
         # Уведомляем пользователя об успешной оплате
         try:
             user_message = (
-                f"✅ <b>Оплата получена!</b>\n\n"
-                f"📦 Товар: {product_name}\n"
+                f"🎉 <b>Поздравляем с покупкой!</b>\n\n"
+                f"📦 Ваш товар: {product_name}\n"
                 f"🔑 Код получения: <code>{pickup_code}</code>\n\n"
-                f"Администратор обработает ваш заказ в ближайшее время.\n"
-                f"Вы получите уведомление когда товар будет готов."
+                f"⚠️ Важно: никому не передавайте код получения.\n\n"
+                f"Для получения товара отправьте данный код поддержке"
             )
-            result = await send_telegram_message(user_id, user_message)
+            reply_markup = {
+                "inline_keyboard": [
+                    [{"text": "📞 Поддержка", "url": SUPPORT_URL}]
+                ]
+            }
+            result = await send_telegram_message(user_id, user_message, reply_markup)
             logger.info(f"Payment notification sent to user {user_id}: success={result}")
         except Exception as e:
             logger.error(f"Failed to notify user {user_id}: {e}")
