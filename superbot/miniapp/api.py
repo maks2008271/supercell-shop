@@ -315,6 +315,8 @@ async def get_validated_user(x_telegram_init_data: str = Header(None, alias="X-T
 
 async def send_telegram_message(chat_id: int, text: str, reply_markup: dict = None):
     """Отправить сообщение через Telegram Bot API"""
+    import json as json_lib
+
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     payload = {
         "chat_id": chat_id,
@@ -322,11 +324,14 @@ async def send_telegram_message(chat_id: int, text: str, reply_markup: dict = No
         "parse_mode": "HTML"
     }
     if reply_markup:
-        payload["reply_markup"] = reply_markup
+        # reply_markup должен быть JSON-строкой для Telegram API
+        payload["reply_markup"] = json_lib.dumps(reply_markup)
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=30.0) as client:
         try:
             response = await client.post(url, json=payload)
+            if response.status_code != 200:
+                logger.error(f"Telegram API error: {response.status_code} - {response.text}")
             return response.status_code == 200
         except Exception as e:
             logger.error(f"Failed to send telegram message: {e}")
@@ -776,7 +781,6 @@ async def purchase_product(
 from wata_form import (
     create_payment_form_url_async,
     WATA_API_TOKEN,
-    PaymentStatus,
 )
 from fastapi.responses import HTMLResponse, RedirectResponse
 
@@ -1116,7 +1120,7 @@ async def wata_webhook(request: Request):
     logger.info(f"Webhook received from wata.pro, body length: {len(body)}")
 
     # PRODUCTION: Проверяем подпись webhook
-    from miniapp.wata_form import verify_webhook_signature_async
+    from wata_form import verify_webhook_signature_async
     if IS_PRODUCTION:
         is_valid = await verify_webhook_signature_async(body, signature)
         if not is_valid:
@@ -1130,6 +1134,9 @@ async def wata_webhook(request: Request):
 
     try:
         data = await request.json()
+        # В dev режиме логируем полные данные webhook для отладки
+        if not IS_PRODUCTION:
+            logger.info(f"Wata webhook FULL DATA: {data}")
     except Exception as e:
         logger.error(f"Failed to parse webhook JSON: {e}")
         raise HTTPException(status_code=400, detail="Invalid JSON")
@@ -1141,6 +1148,10 @@ async def wata_webhook(request: Request):
     amount = data.get("amount")
 
     logger.info(f"Wata webhook: transaction={transaction_id}, status={status}, order={order_id_str}, amount={amount}")
+
+    # Нормализуем статус (wata.pro может присылать разный регистр)
+    status_normalized = status.lower() if status else ""
+    logger.info(f"Normalized status: {status_normalized}")
 
     # Извлекаем числовой order_id
     numeric_order_id = None
@@ -1171,7 +1182,7 @@ async def wata_webhook(request: Request):
     product_name = order[3] or "Товар"
     pickup_code = order[6]
 
-    if status == PaymentStatus.PAID:
+    if status_normalized == "paid":
         logger.info(f"Payment CONFIRMED for order {numeric_order_id}")
 
         # Обновляем статус заказа на "paid"
@@ -1190,8 +1201,8 @@ async def wata_webhook(request: Request):
                 f"Администратор обработает ваш заказ в ближайшее время.\n"
                 f"Вы получите уведомление когда товар будет готов."
             )
-            await send_telegram_message(user_id, user_message)
-            logger.info(f"Payment notification sent to user {user_id}")
+            result = await send_telegram_message(user_id, user_message)
+            logger.info(f"Payment notification sent to user {user_id}: success={result}")
         except Exception as e:
             logger.error(f"Failed to notify user {user_id}: {e}")
 
@@ -1217,12 +1228,13 @@ async def wata_webhook(request: Request):
                 ]
             }
             for admin_id in ADMIN_IDS:
-                await send_telegram_message(admin_id, admin_message, reply_markup)
+                result = await send_telegram_message(admin_id, admin_message, reply_markup)
+                logger.info(f"Admin notification to {admin_id}: success={result}")
             logger.info(f"Admin notifications sent for paid order {numeric_order_id}")
         except Exception as e:
             logger.error(f"Failed to notify admins: {e}")
 
-    elif status == PaymentStatus.DECLINED:
+    elif status_normalized == "declined":
         logger.warning(f"Payment DECLINED for order {numeric_order_id}")
 
         # Обновляем статус заказа
@@ -1239,7 +1251,7 @@ async def wata_webhook(request: Request):
         except Exception as e:
             logger.error(f"Failed to notify user about declined payment: {e}")
 
-    elif status == PaymentStatus.PENDING:
+    elif status_normalized == "pending":
         logger.info(f"Payment PENDING for order {numeric_order_id}")
         # Ничего не делаем, ждём финального статуса
 
