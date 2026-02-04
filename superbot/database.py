@@ -325,12 +325,13 @@ async def get_user_orders(user_id: int):
 async def get_user_orders_stats(user_id: int):
     """Получить статистику заказов пользователя
     Возвращает: {'count': количество, 'total': общая сумма}
+    Считает оплаченные и завершённые заказы (paid + completed)
     """
     async with aiosqlite.connect(DB_NAME) as db:
         async with db.execute("""
             SELECT COUNT(*), COALESCE(SUM(amount), 0)
             FROM orders
-            WHERE user_id = ? AND status = 'completed'
+            WHERE user_id = ? AND status IN ('paid', 'completed')
         """, (user_id,)) as cursor:
             result = await cursor.fetchone()
             return {'count': result[0] if result else 0, 'total': result[1] if result else 0.0}
@@ -917,12 +918,12 @@ async def get_user_orders(user_id: int, limit: int = 20):
 
 
 async def get_pending_orders():
-    """Получить все незакрытые заказы"""
+    """Получить все незакрытые заказы (pending, pending_payment, paid)"""
     async with aiosqlite.connect(DB_NAME) as db:
         cursor = await db.execute("""
-            SELECT id, user_id, product_name, amount, pickup_code, created_at
+            SELECT id, user_id, product_name, amount, pickup_code, created_at, status
             FROM orders
-            WHERE status = 'pending'
+            WHERE status IN ('pending', 'pending_payment', 'paid')
             ORDER BY created_at DESC
         """)
         return await cursor.fetchall()

@@ -1346,24 +1346,29 @@ async def wata_webhook(request: Request):
 
     try:
         data = await request.json()
-        # В dev режиме логируем полные данные webhook для отладки
-        if not IS_PRODUCTION:
-            logger.info(f"Wata webhook FULL DATA: {data}")
+        # ВСЕГДА логируем полные данные webhook для отладки
+        logger.info(f"Wata webhook FULL DATA: {data}")
     except Exception as e:
         logger.error(f"Failed to parse webhook JSON: {e}")
         raise HTTPException(status_code=400, detail="Invalid JSON")
 
     # Извлекаем данные из webhook
-    transaction_id = data.get("transactionId")
-    status = data.get("status")
-    order_id_str = data.get("orderId", "")  # Формат: "order_123"
-    amount = data.get("amount")
+    # wata.pro может использовать разные названия полей
+    transaction_id = data.get("transactionId") or data.get("transaction_id") or data.get("id")
+    status = data.get("status") or data.get("state") or data.get("paymentStatus")
+    order_id_str = data.get("orderId") or data.get("order_id") or data.get("merchantOrderId") or ""
+    amount = data.get("amount") or data.get("sum") or data.get("total")
 
     logger.info(f"Wata webhook: transaction={transaction_id}, status={status}, order={order_id_str}, amount={amount}")
 
-    # Нормализуем статус (wata.pro может присылать разный регистр)
+    # Нормализуем статус (wata.pro может присылать разные варианты)
     status_normalized = status.lower() if status else ""
-    logger.info(f"Normalized status: {status_normalized}")
+    # Маппинг возможных статусов от wata.pro
+    if status_normalized in ("success", "completed", "approved", "confirmed"):
+        status_normalized = "paid"
+    elif status_normalized in ("failed", "rejected", "cancelled", "canceled", "error"):
+        status_normalized = "declined"
+    logger.info(f"Normalized status: '{status}' -> '{status_normalized}'")
 
     # Извлекаем числовой order_id
     numeric_order_id = None

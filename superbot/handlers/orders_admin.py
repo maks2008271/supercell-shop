@@ -35,9 +35,11 @@ async def show_admin_orders(callback: CallbackQuery):
 
     keyboard = []
     for order in orders:
-        order_id, user_id, product_name, amount, pickup_code, created_at = order
+        order_id, user_id, product_name, amount, pickup_code, created_at, status = order
+        # Показываем статус: 💳 ожидает оплаты, ✅ оплачен, ⏳ в обработке
+        status_icon = "💳" if status == "pending_payment" else "✅" if status == "paid" else "⏳"
         keyboard.append([InlineKeyboardButton(
-            text=f"Заказ #{order_id} - {product_name} ({amount:.0f} ₽)",
+            text=f"{status_icon} #{order_id} - {product_name} ({amount:.0f} ₽)",
             callback_data=f"view_order_{order_id}"
         )])
 
