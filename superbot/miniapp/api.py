@@ -1353,11 +1353,11 @@ async def wata_webhook(request: Request):
         raise HTTPException(status_code=400, detail="Invalid JSON")
 
     # Извлекаем данные из webhook
-    # wata.pro может использовать разные названия полей
-    transaction_id = data.get("transactionId") or data.get("transaction_id") or data.get("id")
-    status = data.get("status") or data.get("state") or data.get("paymentStatus")
-    order_id_str = data.get("orderId") or data.get("order_id") or data.get("merchantOrderId") or ""
-    amount = data.get("amount") or data.get("sum") or data.get("total")
+    # wata.pro использует transactionStatus для статуса платежа
+    transaction_id = data.get("transactionId")
+    status = data.get("transactionStatus")  # Paid, Created, Declined и т.д.
+    order_id_str = data.get("orderId") or ""
+    amount = data.get("amount")
 
     logger.info(f"Wata webhook: transaction={transaction_id}, status={status}, order={order_id_str}, amount={amount}")
 
