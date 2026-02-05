@@ -6,6 +6,19 @@ import string
 import asyncio
 from functools import lru_cache
 from typing import Optional
+from contextlib import asynccontextmanager
+
+
+@asynccontextmanager
+async def get_db():
+    """Получить подключение к БД с правильными настройками WAL и таймаутом"""
+    db = await aiosqlite.connect(DB_NAME)
+    try:
+        await db.execute("PRAGMA busy_timeout=30000")  # 30 секунд таймаут
+        await db.execute("PRAGMA journal_mode=WAL")
+        yield db
+    finally:
+        await db.close()
 
 # Глобальный пул соединений
 _db_pool = None
@@ -32,8 +45,8 @@ class DBPool:
             # Включаем WAL режим для лучшей параллельной работы
             await conn.execute("PRAGMA journal_mode=WAL")
             await conn.execute("PRAGMA synchronous=NORMAL")
-            # Увеличиваем таймаут для высоконагруженных операций
-            await conn.execute("PRAGMA busy_timeout=5000")
+            # Увеличиваем таймаут для высоконагруженных операций (30 секунд)
+            await conn.execute("PRAGMA busy_timeout=30000")
             await self.connections.put(conn)
 
         self._initialized = True
@@ -75,7 +88,7 @@ async def init_db():
     # Инициализируем пул соединений
     await get_db_pool()
 
-    async with aiosqlite.connect(DB_NAME) as db:
+    async with get_db() as db:
         # Таблица пользователей
         await db.execute("""
             CREATE TABLE IF NOT EXISTS users (
@@ -310,7 +323,7 @@ async def get_user_balance(user_id: int) -> float:
 
 async def get_user_orders(user_id: int):
     """Получить заказы пользователя"""
-    async with aiosqlite.connect(DB_NAME) as db:
+    async with get_db() as db:
         async with db.execute("""
             SELECT o.id, p.name, o.amount, o.status, o.created_at
             FROM orders o
@@ -327,7 +340,7 @@ async def get_user_orders_stats(user_id: int):
     Возвращает: {'count': количество, 'total': общая сумма}
     Считает оплаченные и завершённые заказы (paid + completed)
     """
-    async with aiosqlite.connect(DB_NAME) as db:
+    async with get_db() as db:
         async with db.execute("""
             SELECT COUNT(*), COALESCE(SUM(amount), 0)
             FROM orders
@@ -339,7 +352,7 @@ async def get_user_orders_stats(user_id: int):
 
 async def get_all_products(category: str = None):
     """Получить все товары или товары по категории"""
-    async with aiosqlite.connect(DB_NAME) as db:
+    async with get_db() as db:
         if category:
             query = "SELECT * FROM products WHERE category = ? AND in_stock = 1"
             async with db.execute(query, (category,)) as cursor:
@@ -352,7 +365,7 @@ async def get_all_products(category: str = None):
 
 async def add_sample_products():
     """Добавить примеры товаров (для тестирования)"""
-    async with aiosqlite.connect(DB_NAME) as db:
+    async with get_db() as db:
         # Проверяем, есть ли уже товары
         async with db.execute("SELECT COUNT(*) FROM products") as cursor:
             count = await cursor.fetchone()
@@ -428,7 +441,7 @@ async def create_order(user_id: int, product_id: int, amount: float, product_nam
     if pickup_code is None:
         pickup_code = generate_pickup_code()
 
-    async with aiosqlite.connect(DB_NAME) as db:
+    async with get_db() as db:
         await db.execute(
             "INSERT INTO orders (user_id, product_id, product_name, amount, game, pickup_code, status, supercell_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (user_id, product_id, product_name, amount, game, pickup_code, "pending", supercell_id)
@@ -507,7 +520,7 @@ async def get_stats_users(period: str = "all") -> dict:
     """Получить статистику по пользователям
     period: 'today', 'yesterday', '7days', 'all'
     """
-    async with aiosqlite.connect(DB_NAME) as db:
+    async with get_db() as db:
         if period == "today":
             query = "SELECT COUNT(*) FROM users WHERE DATE(last_activity) = DATE('now')"
         elif period == "yesterday":
@@ -526,7 +539,7 @@ async def get_stats_revenue(period: str = "all") -> float:
     """Получить статистику по обороту
     period: 'today', 'yesterday', '7days', 'all'
     """
-    async with aiosqlite.connect(DB_NAME) as db:
+    async with get_db() as db:
         if period == "today":
             query = "SELECT SUM(amount) FROM orders WHERE DATE(created_at) = DATE('now') AND status = 'completed'"
         elif period == "yesterday":
@@ -547,7 +560,7 @@ async def get_stats_sales_by_game(game: str, period: str = "all") -> dict:
     period: 'today', 'yesterday', '7days', 'all'
     Возвращает {'count': количество, 'revenue': сумма}
     """
-    async with aiosqlite.connect(DB_NAME) as db:
+    async with get_db() as db:
         if period == "today":
             date_filter = "AND DATE(created_at) = DATE('now')"
         elif period == "yesterday":
@@ -573,7 +586,7 @@ async def get_stats_sales_by_game(game: str, period: str = "all") -> dict:
 
 async def get_all_users_ids():
     """Получить ID всех пользователей для рассылки"""
-    async with aiosqlite.connect(DB_NAME) as db:
+    async with get_db() as db:
         async with db.execute("SELECT user_id FROM users") as cursor:
             users = await cursor.fetchall()
             return [user[0] for user in users]
@@ -582,7 +595,7 @@ async def get_all_users_ids():
 
 async def add_product(name: str, description: str, price: float, game: str, subcategory: str, image_file_id: str = None):
     """Добавить новый товар"""
-    async with aiosqlite.connect(DB_NAME) as db:
+    async with get_db() as db:
         await db.execute(
             "INSERT INTO products (name, description, price, game, subcategory, in_stock, image_file_id) VALUES (?, ?, ?, ?, ?, 1, ?)",
             (name, description, price, game, subcategory, image_file_id)
@@ -597,7 +610,7 @@ async def add_product(name: str, description: str, price: float, game: str, subc
 
 async def get_products_by_game_and_subcategory(game: str = None, subcategory: str = None):
     """Получить товары по игре и подкатегории"""
-    async with aiosqlite.connect(DB_NAME) as db:
+    async with get_db() as db:
         if game and subcategory:
             query = "SELECT * FROM products WHERE game = ? AND subcategory = ? AND in_stock = 1"
             async with db.execute(query, (game, subcategory)) as cursor:
@@ -614,7 +627,7 @@ async def get_products_by_game_and_subcategory(game: str = None, subcategory: st
 
 async def update_product(product_id: int, name: str = None, description: str = None, price: float = None, image_file_id: str = None):
     """Обновить товар"""
-    async with aiosqlite.connect(DB_NAME) as db:
+    async with get_db() as db:
         updates = []
         params = []
 
@@ -642,7 +655,7 @@ async def update_product(product_id: int, name: str = None, description: str = N
 
 async def delete_product(product_id: int):
     """Удалить товар (мягкое удаление - устанавливаем in_stock = 0)"""
-    async with aiosqlite.connect(DB_NAME) as db:
+    async with get_db() as db:
         await db.execute("UPDATE products SET in_stock = 0 WHERE id = ?", (product_id,))
         await db.commit()
         return True
@@ -650,7 +663,7 @@ async def delete_product(product_id: int):
 
 async def get_all_products_admin():
     """Получить все товары для админа (включая удаленные)"""
-    async with aiosqlite.connect(DB_NAME) as db:
+    async with get_db() as db:
         query = "SELECT * FROM products ORDER BY game, subcategory, name"
         async with db.execute(query) as cursor:
             return await cursor.fetchall()
@@ -660,7 +673,7 @@ async def get_all_products_admin():
 
 async def create_referral_link(code: str, name: str):
     """Создать реферальную ссылку"""
-    async with aiosqlite.connect(DB_NAME) as db:
+    async with get_db() as db:
         try:
             await db.execute(
                 "INSERT INTO referral_links (code, name) VALUES (?, ?)",
@@ -674,21 +687,21 @@ async def create_referral_link(code: str, name: str):
 
 async def get_all_referral_links():
     """Получить все реферальные ссылки"""
-    async with aiosqlite.connect(DB_NAME) as db:
+    async with get_db() as db:
         async with db.execute("SELECT code, name, created_at FROM referral_links ORDER BY created_at DESC") as cursor:
             return await cursor.fetchall()
 
 
 async def get_referral_link_by_code(code: str):
     """Получить реферальную ссылку по коду"""
-    async with aiosqlite.connect(DB_NAME) as db:
+    async with get_db() as db:
         async with db.execute("SELECT code, name, created_at FROM referral_links WHERE code = ?", (code,)) as cursor:
             return await cursor.fetchone()
 
 
 async def delete_referral_link(code: str):
     """Удалить реферальную ссылку"""
-    async with aiosqlite.connect(DB_NAME) as db:
+    async with get_db() as db:
         await db.execute("DELETE FROM referral_links WHERE code = ?", (code,))
         await db.commit()
         return True
@@ -696,7 +709,7 @@ async def delete_referral_link(code: str):
 
 async def register_referral_visit(referral_code: str, user_id: int):
     """Зарегистрировать переход по реферальной ссылке"""
-    async with aiosqlite.connect(DB_NAME) as db:
+    async with get_db() as db:
         # Проверяем, есть ли уже запись для этого пользователя с этим кодом
         async with db.execute(
             "SELECT id FROM referral_visits WHERE referral_code = ? AND user_id = ?",
@@ -721,7 +734,7 @@ async def register_referral_visit(referral_code: str, user_id: int):
 
 async def get_referral_stats(referral_code: str):
     """Получить статистику по реферальной ссылке"""
-    async with aiosqlite.connect(DB_NAME) as db:
+    async with get_db() as db:
         # Получаем количество переходов
         async with db.execute(
             "SELECT COUNT(DISTINCT user_id) FROM referral_visits WHERE referral_code = ?",
@@ -796,7 +809,7 @@ async def get_referral_stats(referral_code: str):
 
 async def get_all_users(limit=50, offset=0):
     """Получить список всех пользователей с пагинацией"""
-    async with aiosqlite.connect(DB_NAME) as db:
+    async with get_db() as db:
         cursor = await db.execute("""
             SELECT user_id, username, first_name, balance, registered_at
             FROM users
@@ -808,7 +821,7 @@ async def get_all_users(limit=50, offset=0):
 
 async def get_users_count():
     """Получить общее количество пользователей"""
-    async with aiosqlite.connect(DB_NAME) as db:
+    async with get_db() as db:
         cursor = await db.execute("SELECT COUNT(*) FROM users")
         row = await cursor.fetchone()
         return row[0] if row else 0
@@ -816,7 +829,7 @@ async def get_users_count():
 
 async def search_user_by_id(user_id):
     """Найти пользователя по ID"""
-    async with aiosqlite.connect(DB_NAME) as db:
+    async with get_db() as db:
         cursor = await db.execute("""
             SELECT user_id, username, first_name, balance, registered_at
             FROM users
@@ -827,7 +840,7 @@ async def search_user_by_id(user_id):
 
 async def get_user_full_stats(user_id):
     """Получить полную статистику пользователя"""
-    async with aiosqlite.connect(DB_NAME) as db:
+    async with get_db() as db:
         # Получаем информацию о пользователе
         cursor = await db.execute("""
             SELECT user_id, uid, username, first_name, balance, registered_at, referral_code
@@ -879,7 +892,7 @@ async def set_user_balance(user_id: int, new_balance: float):
 
 async def add_to_user_balance(user_id, amount):
     """Добавить к балансу пользователя"""
-    async with aiosqlite.connect(DB_NAME) as db:
+    async with get_db() as db:
         await db.execute("""
             UPDATE users
             SET balance = balance + ?
@@ -893,7 +906,7 @@ async def add_to_user_balance(user_id, amount):
 
 async def get_user_orders(user_id: int, limit: int = 20):
     """Получить заказы пользователя для истории"""
-    async with aiosqlite.connect(DB_NAME) as db:
+    async with get_db() as db:
         cursor = await db.execute("""
             SELECT id, product_name, amount, status, pickup_code, supercell_id, created_at, game
             FROM orders
@@ -919,7 +932,7 @@ async def get_user_orders(user_id: int, limit: int = 20):
 
 async def get_pending_orders():
     """Получить все незакрытые заказы (pending, pending_payment, paid)"""
-    async with aiosqlite.connect(DB_NAME) as db:
+    async with get_db() as db:
         cursor = await db.execute("""
             SELECT id, user_id, product_name, amount, pickup_code, created_at, status
             FROM orders
@@ -931,7 +944,7 @@ async def get_pending_orders():
 
 async def get_order_by_id(order_id: int):
     """Получить заказ по ID"""
-    async with aiosqlite.connect(DB_NAME) as db:
+    async with get_db() as db:
         cursor = await db.execute("""
             SELECT id, user_id, product_id, product_name, amount, game, pickup_code, status, created_at
             FROM orders
@@ -942,7 +955,7 @@ async def get_order_by_id(order_id: int):
 
 async def confirm_order(order_id: int):
     """Подтвердить заказ"""
-    async with aiosqlite.connect(DB_NAME) as db:
+    async with get_db() as db:
         await db.execute("""
             UPDATE orders
             SET status = 'completed'
@@ -953,7 +966,7 @@ async def confirm_order(order_id: int):
 
 async def cancel_order(order_id: int):
     """Отменить заказ и вернуть деньги пользователю"""
-    async with aiosqlite.connect(DB_NAME) as db:
+    async with get_db() as db:
         # Получаем информацию о заказе
         cursor = await db.execute("""
             SELECT user_id, amount
@@ -991,7 +1004,7 @@ async def cancel_order(order_id: int):
 
 async def save_payment_transaction(order_id: int, transaction_id: str):
     """Сохраняет transaction_id от wata.pro для заказа"""
-    async with aiosqlite.connect(DB_NAME) as db:
+    async with get_db() as db:
         await db.execute("""
             UPDATE orders
             SET transaction_id = ?, status = 'pending_payment'
@@ -1002,7 +1015,7 @@ async def save_payment_transaction(order_id: int, transaction_id: str):
 
 async def get_pending_payments():
     """Получает список заказов с незавершёнными платежами"""
-    async with aiosqlite.connect(DB_NAME) as db:
+    async with get_db() as db:
         cursor = await db.execute("""
             SELECT id, transaction_id, user_id, product_name, amount
             FROM orders
@@ -1027,7 +1040,7 @@ async def update_order_payment_status(order_id: int, status: str):
 
     status: 'paid', 'payment_failed', 'pending_payment'
     """
-    async with aiosqlite.connect(DB_NAME) as db:
+    async with get_db() as db:
         await db.execute("""
             UPDATE orders
             SET status = ?
@@ -1038,7 +1051,7 @@ async def update_order_payment_status(order_id: int, status: str):
 
 async def get_order_by_transaction_id(transaction_id: str):
     """Получает заказ по transaction_id от wata.pro"""
-    async with aiosqlite.connect(DB_NAME) as db:
+    async with get_db() as db:
         cursor = await db.execute("""
             SELECT id, user_id, product_id, product_name, amount, status, pickup_code, supercell_id
             FROM orders
