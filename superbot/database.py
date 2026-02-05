@@ -233,47 +233,60 @@ async def init_db():
 
 
 async def get_or_create_user(user_id: int, username: str = None, first_name: str = None):
-    """Получить или создать пользователя (оптимизированная версия с пулом)"""
-    pool = await get_db_pool()
-    db = await pool.get_connection()
+    """Получить или создать пользователя (с retry для высокой нагрузки)"""
+    max_retries = 5
 
-    try:
-        # Проверяем существование пользователя
+    for attempt in range(max_retries):
+        try:
+            async with get_db() as db:
+                # Проверяем существование пользователя
+                async with db.execute("SELECT * FROM users WHERE user_id = ?", (user_id,)) as cursor:
+                    user = await cursor.fetchone()
+
+                if user:
+                    # Обновляем последнюю активность
+                    await db.execute(
+                        "UPDATE users SET last_activity = datetime('now') WHERE user_id = ?",
+                        (user_id,)
+                    )
+                    await db.commit()
+                    _user_cache[user_id] = {'data': user, 'time': datetime.now()}
+                    return user
+
+                # Пользователя нет — создаём с retry на случай конфликта uid
+                cursor = await db.execute("SELECT COALESCE(MAX(uid), 0) + 1 FROM users")
+                next_uid = (await cursor.fetchone())[0]
+
+                await db.execute(
+                    """INSERT INTO users (user_id, uid, username, first_name, last_activity)
+                       VALUES (?, ?, ?, ?, datetime('now'))""",
+                    (user_id, next_uid, username, first_name)
+                )
+                await db.commit()
+
+                # Инвалидируем кэш
+                if user_id in _user_cache:
+                    del _user_cache[user_id]
+
+                # Возвращаем созданного пользователя
+                async with db.execute("SELECT * FROM users WHERE user_id = ?", (user_id,)) as cursor:
+                    result = await cursor.fetchone()
+                    _user_cache[user_id] = {'data': result, 'time': datetime.now()}
+                    return result
+
+        except Exception as e:
+            error_msg = str(e).lower()
+            if "database is locked" in error_msg or "unique constraint" in error_msg:
+                if attempt < max_retries - 1:
+                    # Небольшая случайная задержка перед retry
+                    await asyncio.sleep(0.1 * (attempt + 1) + random.random() * 0.1)
+                    continue
+            raise
+
+    # Если все попытки исчерпаны, пробуем просто вернуть пользователя
+    async with get_db() as db:
         async with db.execute("SELECT * FROM users WHERE user_id = ?", (user_id,)) as cursor:
-            user = await cursor.fetchone()
-
-        if not user:
-            # Получаем максимальный uid
-            cursor = await db.execute("SELECT MAX(uid) FROM users")
-            max_uid = await cursor.fetchone()
-            next_uid = (max_uid[0] or 0) + 1
-
-            # Создаем нового пользователя
-            await db.execute(
-                "INSERT INTO users (user_id, uid, username, first_name, last_activity) VALUES (?, ?, ?, ?, datetime('now'))",
-                (user_id, next_uid, username, first_name)
-            )
-            await db.commit()
-
-            # Инвалидируем кэш
-            if user_id in _user_cache:
-                del _user_cache[user_id]
-        else:
-            # Обновляем последнюю активность (без коммита для производительности)
-            await db.execute(
-                "UPDATE users SET last_activity = datetime('now') WHERE user_id = ?",
-                (user_id,)
-            )
-            await db.commit()
-
-        # Возвращаем пользователя
-        async with db.execute("SELECT * FROM users WHERE user_id = ?", (user_id,)) as cursor:
-            result = await cursor.fetchone()
-            # Кэшируем результат
-            _user_cache[user_id] = {'data': result, 'time': datetime.now()}
-            return result
-    finally:
-        await pool.return_connection(db)
+            return await cursor.fetchone()
 
 
 async def get_user_uid(user_id: int) -> int:

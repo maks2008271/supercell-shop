@@ -8,6 +8,7 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart
 from aiogram.types import Message, CallbackQuery, FSInputFile, InputMediaPhoto
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.exceptions import TelegramRetryAfter
 from config import BOT_TOKEN
 from database import init_db, get_or_create_user, register_referral_visit, get_referral_link_by_code
 from keyboards import get_main_menu, get_back_to_menu
@@ -58,6 +59,27 @@ def check_rate_limit(user_id: int) -> bool:
     _rate_limit_storage[user_id].append(now)
     return True
 
+
+async def send_with_retry(coro_func, max_retries: int = 3):
+    """
+    Выполняет корутину с автоматическим retry при TelegramRetryAfter.
+
+    Args:
+        coro_func: Функция, возвращающая корутину (lambda или callable)
+        max_retries: Максимальное количество попыток
+    """
+    for attempt in range(max_retries):
+        try:
+            return await coro_func()
+        except TelegramRetryAfter as e:
+            if attempt < max_retries - 1:
+                wait_time = e.retry_after + 1  # +1 секунда для надёжности
+                logger.warning(f"Telegram flood control, waiting {wait_time}s (attempt {attempt + 1}/{max_retries})")
+                await asyncio.sleep(wait_time)
+            else:
+                logger.error(f"Max retries reached for Telegram API call")
+                raise
+
 # Инициализация бота и диспетчера
 bot = Bot(token=BOT_TOKEN)
 storage = MemoryStorage()
@@ -100,24 +122,27 @@ async def cmd_start(message: Message):
 
     # Используем абсолютный путь к файлу
     photo_path = BASE_DIR / "main.png"
-
-    if photo_path.exists():
-        photo = FSInputFile(str(photo_path))
-        await message.answer_photo(
-            photo=photo,
-            caption="👋 Приветствуем тебя в Supercell Shop!\n\n"
+    caption_text = ("👋 Приветствуем тебя в Supercell Shop!\n\n"
                     "Самые низкие цены и безопасный донат ждут тебя!\n"
-                    "Воспользуйся кнопками ниже 👇",
-            reply_markup=get_main_menu()
-        )
-    else:
-        # Если файл не найден, отправляем без фото
-        await message.answer(
-            text="👋 Приветствуем тебя в Supercell Shop!\n\n"
-                 "Самые низкие цены и безопасный донат ждут тебя!\n"
-                 "Воспользуйся кнопками ниже 👇",
-            reply_markup=get_main_menu()
-        )
+                    "Воспользуйся кнопками ниже 👇")
+
+    try:
+        if photo_path.exists():
+            photo = FSInputFile(str(photo_path))
+            await send_with_retry(lambda: message.answer_photo(
+                photo=photo,
+                caption=caption_text,
+                reply_markup=get_main_menu()
+            ))
+        else:
+            # Если файл не найден, отправляем без фото
+            await send_with_retry(lambda: message.answer(
+                text=caption_text,
+                reply_markup=get_main_menu()
+            ))
+    except TelegramRetryAfter:
+        logger.error(f"Failed to send start message to {user_id} after retries")
+        # Молча пропускаем — пользователь просто не получит приветствие
 
 
 @dp.callback_query(F.data == "main_menu")
@@ -136,28 +161,47 @@ async def back_to_menu(callback: CallbackQuery):
 
     try:
         # Пытаемся отредактировать caption (если это уже фото)
-        await callback.message.edit_caption(
+        await send_with_retry(lambda: callback.message.edit_caption(
             caption=caption_text,
             reply_markup=get_main_menu()
-        )
+        ))
+    except TelegramRetryAfter:
+        logger.warning(f"Flood control on edit_caption for user {callback.from_user.id}")
     except Exception as e:
         # Если не получилось (сообщение без фото), используем edit_media
         try:
             if photo_path.exists():
                 photo = FSInputFile(str(photo_path))
-                await callback.message.edit_media(
+                await send_with_retry(lambda: callback.message.edit_media(
                     media=InputMediaPhoto(media=photo, caption=caption_text),
                     reply_markup=get_main_menu()
-                )
+                ))
             else:
                 # Если фото не найдено, просто редактируем текст
-                await callback.message.edit_text(
+                await send_with_retry(lambda: callback.message.edit_text(
                     text=caption_text,
                     reply_markup=get_main_menu()
-                )
+                ))
+        except TelegramRetryAfter:
+            logger.warning(f"Flood control on edit_media for user {callback.from_user.id}")
         except Exception as inner_e:
             logger.error(f"Ошибка при возврате в меню: {inner_e}")
-    await callback.answer()
+
+    try:
+        await callback.answer()
+    except TelegramRetryAfter:
+        pass
+
+
+@dp.errors()
+async def errors_handler(event, exception):
+    """Глобальный обработчик ошибок"""
+    if isinstance(exception, TelegramRetryAfter):
+        logger.warning(f"Telegram flood control: retry in {exception.retry_after}s")
+        # Ждём и не падаем — просто пропускаем этот запрос
+        return True
+    logger.error(f"Unhandled exception: {exception}", exc_info=True)
+    return True
 
 
 async def main():
