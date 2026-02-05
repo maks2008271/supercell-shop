@@ -551,16 +551,18 @@ async def get_stats_users(period: str = "all") -> dict:
 async def get_stats_revenue(period: str = "all") -> float:
     """Получить статистику по обороту
     period: 'today', 'yesterday', '7days', 'all'
+    Считает оплаченные заказы: 'paid' (СБП), 'pending' (с баланса), 'completed' (выполнен)
     """
     async with get_db() as db:
+        # Учитываем все оплаченные заказы (не pending_payment и не cancelled)
         if period == "today":
-            query = "SELECT SUM(amount) FROM orders WHERE DATE(created_at) = DATE('now') AND status = 'completed'"
+            query = "SELECT SUM(amount) FROM orders WHERE DATE(created_at) = DATE('now') AND status IN ('paid', 'pending', 'completed')"
         elif period == "yesterday":
-            query = "SELECT SUM(amount) FROM orders WHERE DATE(created_at) = DATE('now', '-1 day') AND status = 'completed'"
+            query = "SELECT SUM(amount) FROM orders WHERE DATE(created_at) = DATE('now', '-1 day') AND status IN ('paid', 'pending', 'completed')"
         elif period == "7days":
-            query = "SELECT SUM(amount) FROM orders WHERE DATE(created_at) >= DATE('now', '-7 days') AND status = 'completed'"
+            query = "SELECT SUM(amount) FROM orders WHERE DATE(created_at) >= DATE('now', '-7 days') AND status IN ('paid', 'pending', 'completed')"
         else:  # all
-            query = "SELECT SUM(amount) FROM orders WHERE status = 'completed'"
+            query = "SELECT SUM(amount) FROM orders WHERE status IN ('paid', 'pending', 'completed')"
 
         async with db.execute(query) as cursor:
             result = await cursor.fetchone()
@@ -572,6 +574,7 @@ async def get_stats_sales_by_game(game: str, period: str = "all") -> dict:
     game: 'brawlstars', 'clashroyale', 'clashofclans'
     period: 'today', 'yesterday', '7days', 'all'
     Возвращает {'count': количество, 'revenue': сумма}
+    Считает оплаченные заказы: 'paid', 'pending', 'completed'
     """
     async with get_db() as db:
         if period == "today":
@@ -583,8 +586,8 @@ async def get_stats_sales_by_game(game: str, period: str = "all") -> dict:
         else:  # all
             date_filter = ""
 
-        query_count = f"SELECT COUNT(*) FROM orders WHERE game = ? AND status = 'completed' {date_filter}"
-        query_revenue = f"SELECT SUM(amount) FROM orders WHERE game = ? AND status = 'completed' {date_filter}"
+        query_count = f"SELECT COUNT(*) FROM orders WHERE game = ? AND status IN ('paid', 'pending', 'completed') {date_filter}"
+        query_revenue = f"SELECT SUM(amount) FROM orders WHERE game = ? AND status IN ('paid', 'pending', 'completed') {date_filter}"
 
         async with db.execute(query_count, (game,)) as cursor:
             count = await cursor.fetchone()

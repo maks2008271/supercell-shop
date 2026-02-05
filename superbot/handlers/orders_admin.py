@@ -33,20 +33,40 @@ async def show_admin_orders(callback: CallbackQuery):
         await callback.answer()
         return
 
+    # Считаем статистику
+    paid_count = sum(1 for o in orders if o[6] == "paid")
+    pending_count = sum(1 for o in orders if o[6] == "pending_payment")
+    other_count = len(orders) - paid_count - pending_count
+
     keyboard = []
     for order in orders:
         order_id, user_id, product_name, amount, pickup_code, created_at, status = order
-        # Показываем статус: 💳 ожидает оплаты, ✅ оплачен, ⏳ в обработке
-        status_icon = "💳" if status == "pending_payment" else "✅" if status == "paid" else "⏳"
+        # Чёткие статусы оплаты
+        if status == "pending_payment":
+            status_label = "⏳ НЕ ОПЛАЧЕН"
+        elif status == "paid":
+            status_label = "💰 ОПЛАЧЕН"
+        else:
+            status_label = "📦 В обработке"
+
         keyboard.append([InlineKeyboardButton(
-            text=f"{status_icon} #{order_id} - {product_name} ({amount:.0f} ₽)",
+            text=f"{status_label} | #{order_id} - {amount:.0f}₽",
             callback_data=f"view_order_{order_id}"
         )])
 
     keyboard.append([InlineKeyboardButton(text="Назад", callback_data="admin_panel")])
 
+    # Заголовок со статистикой
+    header = f"📋 Незакрытые заказы ({len(orders)})\n\n"
+    if paid_count > 0:
+        header += f"💰 Оплачено: {paid_count}\n"
+    if pending_count > 0:
+        header += f"⏳ Ожидает оплаты: {pending_count}\n"
+    if other_count > 0:
+        header += f"📦 В обработке: {other_count}\n"
+
     await callback.message.edit_text(
-        f"Незакрытые заказы ({len(orders)}):",
+        header,
         reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
     )
     await callback.answer()
@@ -71,13 +91,25 @@ async def view_order_details(callback: CallbackQuery):
     product_name = order[3]
     amount = order[4]
     pickup_code = order[6]
+    status = order[7]
     created_at = order[8]
 
     # Получаем UID пользователя
     user_uid = await get_user_uid(user_id)
 
+    # Статус оплаты
+    if status == "pending_payment":
+        status_text = "⏳ НЕ ОПЛАЧЕН (ожидает оплаты СБП)"
+    elif status == "paid":
+        status_text = "💰 ОПЛАЧЕН"
+    else:
+        status_text = "📦 В обработке (оплачен с баланса)"
+
     text = (
         f"Заказ #{order_id}\n\n"
+        f"{'='*20}\n"
+        f"СТАТУС: {status_text}\n"
+        f"{'='*20}\n\n"
         f"Товар: {product_name}\n"
         f"Сумма: {amount:.0f} ₽\n"
         f"Покупатель: UID #{user_uid}\n"
