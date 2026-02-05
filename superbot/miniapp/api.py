@@ -866,6 +866,53 @@ async def wata_status():
     }
 
 
+@app.get("/api/db-debug")
+async def db_debug(admin_key: str = None):
+    """
+    Диагностика базы данных.
+    Показывает путь к БД и тестирует запись/чтение.
+    """
+    expected_key = BOT_TOKEN[:10] if BOT_TOKEN else "test"
+    if admin_key != expected_key:
+        return {"error": "Invalid admin key"}
+
+    from config import DB_NAME
+    from database import get_db
+
+    result = {
+        "db_path": DB_NAME,
+        "db_exists": os.path.exists(DB_NAME),
+        "cwd": os.getcwd(),
+        "api_file": os.path.abspath(__file__),
+    }
+
+    # Проверяем последние заказы и их статусы
+    try:
+        async with get_db() as db:
+            cursor = await db.execute("""
+                SELECT id, status, created_at FROM orders
+                ORDER BY id DESC LIMIT 10
+            """)
+            orders = await cursor.fetchall()
+            result["recent_orders"] = [
+                {"id": o[0], "status": o[1], "created_at": o[2]}
+                for o in orders
+            ]
+
+            # Считаем по статусам
+            cursor = await db.execute("""
+                SELECT status, COUNT(*) FROM orders GROUP BY status
+            """)
+            status_counts = await cursor.fetchall()
+            result["status_counts"] = {
+                (s[0] or "NULL"): s[1] for s in status_counts
+            }
+    except Exception as e:
+        result["db_error"] = str(e)
+
+    return result
+
+
 @app.get("/api/orders-debug")
 async def orders_debug(admin_key: str = None, limit: int = 50):
     """
@@ -1704,7 +1751,19 @@ async def wata_webhook(request: Request):
         logger.info(f"Payment CONFIRMED for order {numeric_order_id}")
 
         # Обновляем статус заказа на "paid"
-        await update_order_payment_status(numeric_order_id, "paid")
+        try:
+            await update_order_payment_status(numeric_order_id, "paid")
+            logger.info(f"Order {numeric_order_id} status updated to 'paid' successfully")
+        except Exception as e:
+            logger.error(f"FAILED to update order {numeric_order_id} status: {e}", exc_info=True)
+
+        # Проверяем что обновилось
+        order_check = await get_order_by_id(numeric_order_id)
+        if order_check:
+            actual_status = order_check[7] if len(order_check) > 7 else None
+            logger.info(f"Order {numeric_order_id} actual status after update: '{actual_status}'")
+            if actual_status != "paid":
+                logger.error(f"ORDER STATUS MISMATCH! Expected 'paid', got '{actual_status}'")
 
         # Сохраняем transaction_id если есть
         if transaction_id:

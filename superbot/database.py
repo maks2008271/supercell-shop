@@ -1099,13 +1099,36 @@ async def update_order_payment_status(order_id: int, status: str):
 
     status: 'paid', 'payment_failed', 'pending_payment'
     """
-    async with get_db() as db:
-        await db.execute("""
-            UPDATE orders
-            SET status = ?
-            WHERE id = ?
-        """, (status, order_id))
-        await db.commit()
+    import logging
+    logger = logging.getLogger(__name__)
+
+    try:
+        async with get_db() as db:
+            # Сначала проверим текущий статус
+            cursor = await db.execute("SELECT status FROM orders WHERE id = ?", (order_id,))
+            old_status = await cursor.fetchone()
+            logger.info(f"[UPDATE_STATUS] Order {order_id}: OLD status = {old_status}")
+
+            # Обновляем
+            await db.execute("""
+                UPDATE orders
+                SET status = ?
+                WHERE id = ?
+            """, (status, order_id))
+            await db.commit()
+
+            # Проверим что обновилось
+            cursor = await db.execute("SELECT status FROM orders WHERE id = ?", (order_id,))
+            new_status = await cursor.fetchone()
+            logger.info(f"[UPDATE_STATUS] Order {order_id}: NEW status = {new_status}")
+
+            if new_status and new_status[0] == status:
+                logger.info(f"[UPDATE_STATUS] Order {order_id} successfully updated to '{status}'")
+            else:
+                logger.error(f"[UPDATE_STATUS] Order {order_id} UPDATE FAILED! Expected '{status}', got {new_status}")
+    except Exception as e:
+        logger.error(f"[UPDATE_STATUS] Exception updating order {order_id}: {e}", exc_info=True)
+        raise
 
 
 async def get_order_by_transaction_id(transaction_id: str):
