@@ -10,7 +10,7 @@ from database import (
     update_product, delete_product, get_all_products_admin, get_product_by_id,
     create_referral_link, get_all_referral_links, get_referral_stats, delete_referral_link,
     get_all_users, search_user_by_id, get_user_full_stats,
-    search_user_by_uid, get_user_uid, get_orders_stats_debug
+    search_user_by_uid, get_user_uid
 )
 import json
 import asyncio
@@ -123,55 +123,37 @@ async def show_all_stats(callback: CallbackQuery):
     users_today = await get_stats_users("today")
     users_week = await get_stats_users("7days")
 
-    # Получаем отладочную статистику по заказам
-    debug = await get_orders_stats_debug()
-
-    # Получаем статистику по обороту (теперь считает все кроме cancelled и pending_payment)
+    # Получаем статистику по обороту
     revenue_total = await get_stats_revenue("all")
     revenue_today = await get_stats_revenue("today")
     revenue_week = await get_stats_revenue("7days")
 
-    # Статистика по статусам заказов
-    status_text = ""
-    status_names = {
-        'pending': '📦 В обработке',
-        'paid': '💰 Оплачен СБП',
-        'completed': '✅ Выполнен',
-        'cancelled': '❌ Отменён',
-        'pending_payment': '⏳ Ожидает оплаты',
-        'NULL': '❓ Без статуса'
-    }
-    for status, data in debug['by_status'].items():
-        name = status_names.get(status, status)
-        status_text += f"  {name}: {data['count']} шт / {data['sum']:.0f}₽\n"
-
-    # Статистика по играм из debug
-    games_text = ""
+    # Получаем статистику продаж по играм
+    games = ['brawlstars', 'clashroyale', 'clashofclans']
     game_names = {
         'brawlstars': 'Brawl Stars',
         'clashroyale': 'Clash Royale',
-        'clashofclans': 'Clash of Clans',
-        'NULL': 'Без игры'
+        'clashofclans': 'Clash of Clans'
     }
-    for game, data in debug['by_game'].items():
-        name = game_names.get(game, game)
-        games_text += f"  {name}: {data['count']} шт / {data['sum']:.0f}₽\n"
+
+    games_text = ""
+    for game in games:
+        stats = await get_stats_sales_by_game(game, "all")
+        count = stats.get('count', 0)
+        revenue = stats.get('revenue', 0)
+        games_text += f"{game_names[game]}: {count} шт / {revenue:.0f} ₽\n"
 
     text = (
         f"📊 Статистика\n\n"
         f"👥 Пользователи:\n"
-        f"  Всего: {users_total}\n"
-        f"  Сегодня: {users_today}\n"
-        f"  За 7 дней: {users_week}\n\n"
-        f"💰 Оборот (оплаченные):\n"
-        f"  Всего: {revenue_total:.0f} ₽\n"
-        f"  Сегодня: {revenue_today:.0f} ₽\n"
-        f"  За 7 дней: {revenue_week:.0f} ₽\n\n"
-        f"📋 Все заказы в БД:\n"
-        f"  Всего: {debug['total_count']} шт\n"
-        f"  Сумма: {debug['total_sum']:.0f} ₽\n\n"
-        f"📊 По статусам:\n{status_text}\n"
-        f"🎮 По играм (оплаченные):\n{games_text}"
+        f"Всего: {users_total}\n"
+        f"Сегодня: {users_today}\n"
+        f"За 7 дней: {users_week}\n\n"
+        f"💰 Оборот:\n"
+        f"Всего: {revenue_total:.0f} ₽\n"
+        f"Сегодня: {revenue_today:.0f} ₽\n"
+        f"За 7 дней: {revenue_week:.0f} ₽\n\n"
+        f"🎮 Продажи по играм:\n{games_text}"
     )
 
     keyboard = [[InlineKeyboardButton(text="« Назад", callback_data="admin_panel")]]
