@@ -82,33 +82,86 @@ async def check_pending_payments_task():
 
     logger.info("Payment checker task started")
 
+    # Импортируем клиент wata.pro
+    from wata_payment import WataPaymentClient
+    client = WataPaymentClient()
+
     while payment_checker_running:
         try:
-            #Получаем список незавершённых платежей из базы
+            # Получаем список незавершённых платежей из базы
             pending = await get_pending_payments()
 
             if pending:
                 logger.info(f"Checking {len(pending)} pending payments...")
 
-                #Раскомментировать когда будет API токен wata.pro:
-                #from wata_payment import WataPaymentClient
-                #client = WataPaymentClient()
-                #updated = await client.check_pending_payments(pending)
-                #
-                #for tx in updated:
-                #    if tx["status"] == "Paid":
-                #        #Обновляем статус заказа
-                #        await update_order_payment_status(tx["order_id"], "paid")
-                #        #Уведомляем админа (получить order info и отправить)
-                #        logger.info(f"Order {tx['order_id']} marked as paid via checker")
-                #    elif tx["status"] == "Declined":
-                #        await update_order_payment_status(tx["order_id"], "payment_failed")
-                #        logger.info(f"Order {tx['order_id']} payment declined")
+                for order in pending:
+                    order_id = order["order_id"]
+                    transaction_id = order["transaction_id"]
+
+                    if not transaction_id:
+                        continue
+
+                    try:
+                        # Проверяем статус через wata.pro API
+                        status_data = await client.get_transaction_status(transaction_id)
+
+                        if status_data:
+                            wata_status = (status_data.get("status") or "").lower()
+
+                            if wata_status == "paid":
+                                # Обновляем статус заказа
+                                await update_order_payment_status(order_id, "paid")
+                                logger.info(f"Order {order_id} marked as paid via checker")
+
+                                # Получаем заказ и отправляем уведомления
+                                order_data = await get_order_by_id(order_id)
+                                if order_data:
+                                    user_id = order_data[1]
+                                    product_name = order_data[3] or "Товар"
+                                    pickup_code = order_data[6]
+                                    amount = order_data[4]
+
+                                    # Уведомляем пользователя
+                                    user_message = (
+                                        f"🎉 <b>Оплата подтверждена!</b>\n\n"
+                                        f"📦 Ваш товар: {product_name}\n"
+                                        f"🔑 Код получения: <code>{pickup_code}</code>\n\n"
+                                        f"⚠️ Никому не передавайте код.\n"
+                                        f"Для получения товара отправьте код поддержке"
+                                    )
+                                    await send_telegram_message(user_id, user_message, {
+                                        "inline_keyboard": [[{"text": "📞 Поддержка", "url": SUPPORT_URL}]]
+                                    })
+
+                                    # Уведомляем админов
+                                    user_uid = await get_user_uid(user_id)
+                                    admin_message = (
+                                        f"💰 <b>ОПЛАТА ПОЛУЧЕНА!</b> (checker)\n\n"
+                                        f"📦 Заказ: #{order_id}\n"
+                                        f"📦 Товар: {product_name}\n"
+                                        f"💰 Сумма: {amount} ₽\n"
+                                        f"👤 Покупатель: UID #{user_uid}\n"
+                                        f"🔑 Код: {pickup_code}"
+                                    )
+                                    for admin_id in ADMIN_IDS:
+                                        await send_telegram_message(admin_id, admin_message, {
+                                            "inline_keyboard": [
+                                                [{"text": "✅ Выполнен", "callback_data": f"admin_confirm_order_{order_id}"},
+                                                 {"text": "❌ Отменить", "callback_data": f"admin_cancel_order_{order_id}"}]
+                                            ]
+                                        })
+
+                            elif wata_status in ("declined", "failed", "error"):
+                                await update_order_payment_status(order_id, "payment_failed")
+                                logger.info(f"Order {order_id} payment declined via checker")
+
+                    except Exception as e:
+                        logger.error(f"Error checking order {order_id}: {e}")
 
         except Exception as e:
             logger.error(f"Payment checker error: {e}", exc_info=True)
 
-        #Ждём 60 секунд до следующей проверки
+        # Ждём 60 секунд до следующей проверки
         await asyncio.sleep(60)
 
     logger.info("Payment checker task stopped")
@@ -813,6 +866,51 @@ async def wata_status():
     }
 
 
+@app.get("/api/orders-debug")
+async def orders_debug(admin_key: str = None, limit: int = 50):
+    """
+    Диагностика заказов - показывает все заказы и их статусы.
+
+    GET /api/orders-debug?admin_key=YOUR_KEY&limit=50
+    """
+    expected_key = BOT_TOKEN[:10] if BOT_TOKEN else "test"
+    if admin_key != expected_key:
+        return {"error": "Invalid admin key", "hint": "Use first 10 chars of BOT_TOKEN"}
+
+    from database import get_db
+
+    async with get_db() as db:
+        cursor = await db.execute("""
+            SELECT id, user_id, product_name, amount, status, transaction_id, created_at
+            FROM orders
+            ORDER BY id DESC
+            LIMIT ?
+        """, (limit,))
+        rows = await cursor.fetchall()
+
+    orders = []
+    status_counts = {}
+
+    for row in rows:
+        status = row[4] or "null"
+        status_counts[status] = status_counts.get(status, 0) + 1
+        orders.append({
+            "id": row[0],
+            "user_id": row[1],
+            "product": row[2],
+            "amount": row[3],
+            "status": status,
+            "transaction_id": row[5],
+            "created_at": row[6]
+        })
+
+    return {
+        "total_shown": len(orders),
+        "status_breakdown": status_counts,
+        "orders": orders
+    }
+
+
 class CreatePaymentRequest(BaseModel):
     """Запрос на создание платежа"""
     order_id: int
@@ -1217,6 +1315,206 @@ async def simulate_payment(order_id: int, admin_key: str = None, status: str = "
 
 
 # ============================================
+# СИНХРОНИЗАЦИЯ ПЛАТЕЖЕЙ С WATA.PRO
+# ============================================
+
+@app.get("/api/sync-payments")
+async def sync_payments_from_wata(admin_key: str = None):
+    """
+    Синхронизирует статусы платежей с wata.pro.
+
+    Проверяет все заказы в статусе pending_payment через API wata.pro
+    и обновляет статус если платёж был оплачен.
+
+    Использование:
+    GET /api/sync-payments?admin_key=YOUR_KEY
+
+    admin_key = первые 10 символов BOT_TOKEN
+    """
+    expected_key = BOT_TOKEN[:10] if BOT_TOKEN else "test"
+    if admin_key != expected_key:
+        return {
+            "error": "Invalid admin key",
+            "hint": "Use first 10 chars of BOT_TOKEN as admin_key"
+        }
+
+    from wata_payment import WataPaymentClient
+    client = WataPaymentClient()
+
+    # Получаем все pending_payment заказы с transaction_id
+    pending_orders = await get_pending_payments()
+
+    results = {
+        "total_pending": len(pending_orders),
+        "checked": 0,
+        "updated_to_paid": 0,
+        "updated_to_failed": 0,
+        "errors": 0,
+        "details": []
+    }
+
+    for order in pending_orders:
+        order_id = order["order_id"]
+        transaction_id = order["transaction_id"]
+
+        if not transaction_id:
+            continue
+
+        try:
+            # Проверяем статус через wata.pro API
+            status_data = await client.get_transaction_status(transaction_id)
+            results["checked"] += 1
+
+            if status_data:
+                wata_status = status_data.get("status", "").lower()
+                detail = {
+                    "order_id": order_id,
+                    "transaction_id": transaction_id,
+                    "wata_status": status_data.get("status"),
+                    "action": None
+                }
+
+                if wata_status == "paid":
+                    # Обновляем статус на paid
+                    await update_order_payment_status(order_id, "paid")
+                    results["updated_to_paid"] += 1
+                    detail["action"] = "updated to paid"
+
+                    # Получаем заказ и отправляем уведомления
+                    order_data = await get_order_by_id(order_id)
+                    if order_data:
+                        user_id = order_data[1]
+                        product_name = order_data[3] or "Товар"
+                        pickup_code = order_data[6]
+                        amount = order_data[4]
+
+                        # Уведомляем пользователя
+                        user_message = (
+                            f"🎉 <b>Оплата подтверждена!</b>\n\n"
+                            f"📦 Ваш товар: {product_name}\n"
+                            f"🔑 Код получения: <code>{pickup_code}</code>\n\n"
+                            f"⚠️ Никому не передавайте код.\n"
+                            f"Для получения товара отправьте код поддержке"
+                        )
+                        await send_telegram_message(user_id, user_message, {
+                            "inline_keyboard": [[{"text": "📞 Поддержка", "url": SUPPORT_URL}]]
+                        })
+
+                        # Уведомляем админов
+                        user_uid = await get_user_uid(user_id)
+                        admin_message = (
+                            f"💰 <b>ОПЛАТА СИНХРОНИЗИРОВАНА!</b>\n\n"
+                            f"📦 Заказ: #{order_id}\n"
+                            f"📦 Товар: {product_name}\n"
+                            f"💰 Сумма: {amount} ₽\n"
+                            f"👤 Покупатель: UID #{user_uid}\n"
+                            f"🔑 Код: {pickup_code}\n"
+                            f"ℹ️ Оплата найдена через синхронизацию"
+                        )
+                        for admin_id in ADMIN_IDS:
+                            await send_telegram_message(admin_id, admin_message, {
+                                "inline_keyboard": [
+                                    [{"text": "✅ Выполнен", "callback_data": f"admin_confirm_order_{order_id}"},
+                                     {"text": "❌ Отменить", "callback_data": f"admin_cancel_order_{order_id}"}]
+                                ]
+                            })
+
+                elif wata_status in ("declined", "failed", "error", "cancelled"):
+                    await update_order_payment_status(order_id, "payment_failed")
+                    results["updated_to_failed"] += 1
+                    detail["action"] = "updated to payment_failed"
+                else:
+                    detail["action"] = f"no action (status: {wata_status})"
+
+                results["details"].append(detail)
+            else:
+                results["details"].append({
+                    "order_id": order_id,
+                    "transaction_id": transaction_id,
+                    "error": "Failed to get status from wata.pro"
+                })
+
+        except Exception as e:
+            results["errors"] += 1
+            results["details"].append({
+                "order_id": order_id,
+                "transaction_id": transaction_id,
+                "error": str(e)
+            })
+            logger.error(f"Sync error for order {order_id}: {e}")
+
+    logger.info(f"Payment sync completed: {results['updated_to_paid']} paid, {results['updated_to_failed']} failed")
+    return results
+
+
+@app.get("/api/mark-paid/{order_id}")
+async def mark_order_as_paid(order_id: int, admin_key: str = None):
+    """
+    Вручную помечает заказ как оплаченный.
+
+    Используется когда webhook не дошёл, но оплата в wata.pro есть.
+
+    GET /api/mark-paid/123?admin_key=YOUR_KEY
+    """
+    expected_key = BOT_TOKEN[:10] if BOT_TOKEN else "test"
+    if admin_key != expected_key:
+        return {"error": "Invalid admin key"}
+
+    order = await get_order_by_id(order_id)
+    if not order:
+        return {"error": f"Order {order_id} not found"}
+
+    current_status = order[7] if len(order) > 7 else None
+    if current_status == "paid":
+        return {"message": "Order already marked as paid", "order_id": order_id}
+
+    # Обновляем статус
+    await update_order_payment_status(order_id, "paid")
+
+    user_id = order[1]
+    product_name = order[3] or "Товар"
+    pickup_code = order[6]
+    amount = order[4]
+
+    # Уведомляем пользователя
+    user_message = (
+        f"🎉 <b>Оплата подтверждена!</b>\n\n"
+        f"📦 Ваш товар: {product_name}\n"
+        f"🔑 Код получения: <code>{pickup_code}</code>\n\n"
+        f"⚠️ Никому не передавайте код.\n"
+        f"Для получения товара отправьте код поддержке"
+    )
+    await send_telegram_message(user_id, user_message, {
+        "inline_keyboard": [[{"text": "📞 Поддержка", "url": SUPPORT_URL}]]
+    })
+
+    # Уведомляем админов
+    user_uid = await get_user_uid(user_id)
+    admin_message = (
+        f"💰 <b>ОПЛАТА ПОДТВЕРЖДЕНА ВРУЧНУЮ!</b>\n\n"
+        f"📦 Заказ: #{order_id}\n"
+        f"📦 Товар: {product_name}\n"
+        f"💰 Сумма: {amount} ₽\n"
+        f"👤 Покупатель: UID #{user_uid}\n"
+        f"🔑 Код: {pickup_code}"
+    )
+    for admin_id in ADMIN_IDS:
+        await send_telegram_message(admin_id, admin_message, {
+            "inline_keyboard": [
+                [{"text": "✅ Выполнен", "callback_data": f"admin_confirm_order_{order_id}"},
+                 {"text": "❌ Отменить", "callback_data": f"admin_cancel_order_{order_id}"}]
+            ]
+        })
+
+    return {
+        "success": True,
+        "message": f"Order {order_id} marked as paid",
+        "previous_status": current_status,
+        "notifications_sent": True
+    }
+
+
+# ============================================
 # WEBHOOK ОТ WATA.PRO
 # ============================================
 # URL настроен в ЛК wata.pro: https://supercellshop.xyz/webhook/wata
@@ -1353,20 +1651,23 @@ async def wata_webhook(request: Request):
         raise HTTPException(status_code=400, detail="Invalid JSON")
 
     # Извлекаем данные из webhook
-    # wata.pro использует transactionStatus для статуса платежа
-    transaction_id = data.get("transactionId")
-    status = data.get("transactionStatus")  # Paid, Created, Declined и т.д.
-    order_id_str = data.get("orderId") or ""
+    # wata.pro может присылать статус в разных полях
+    transaction_id = data.get("transactionId") or data.get("transaction_id")
+    # Проверяем несколько возможных полей для статуса
+    status = data.get("transactionStatus") or data.get("status") or data.get("paymentStatus")
+    order_id_str = data.get("orderId") or data.get("order_id") or ""
     amount = data.get("amount")
 
     logger.info(f"Wata webhook: transaction={transaction_id}, status={status}, order={order_id_str}, amount={amount}")
+    logger.info(f"Webhook data keys: {list(data.keys())}")
 
     # Нормализуем статус (wata.pro может присылать разные варианты)
     status_normalized = status.lower() if status else ""
     # Маппинг возможных статусов от wata.pro
-    if status_normalized in ("success", "completed", "approved", "confirmed"):
+    # "Paid" - основной статус успешной оплаты от wata.pro
+    if status_normalized in ("paid", "success", "completed", "approved", "confirmed"):
         status_normalized = "paid"
-    elif status_normalized in ("failed", "rejected", "cancelled", "canceled", "error"):
+    elif status_normalized in ("failed", "rejected", "cancelled", "canceled", "error", "declined"):
         status_normalized = "declined"
     logger.info(f"Normalized status: '{status}' -> '{status_normalized}'")
 
