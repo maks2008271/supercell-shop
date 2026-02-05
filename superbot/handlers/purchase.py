@@ -1,10 +1,30 @@
 from aiogram import Router, F
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
-from database import get_product_by_id, purchase_with_balance, get_user_balance, get_user_uid
+from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from database import (
+    get_product_by_id, purchase_with_balance, get_user_balance, get_user_uid,
+    create_order_without_balance, update_order_payment_status
+)
 from keyboards import get_product_categories
 from config import ADMIN_IDS, SUPPORT_URL
+import sys
+import os
+import re
+import logging
+
+logger = logging.getLogger(__name__)
+
+# Добавляем путь к miniapp для импорта wata_form
+sys.path.append(os.path.join(os.path.dirname(os.path.dirname(__file__)), 'miniapp'))
+from wata_form import create_payment_form_url_async
 
 router = Router()
+
+
+class PurchaseStates(StatesGroup):
+    """Состояния для процесса покупки через СБП"""
+    waiting_for_email = State()
 
 
 @router.callback_query(F.data.startswith("buy_product_"))
@@ -59,8 +79,10 @@ async def buy_product(callback: CallbackQuery):
 
 
 @router.callback_query(F.data.startswith("confirm_buy_"))
-async def confirm_buy_product(callback: CallbackQuery):
+async def confirm_buy_product(callback: CallbackQuery, state: FSMContext):
     """Выбор способа оплаты"""
+    # Очищаем состояние FSM при возврате к выбору оплаты
+    await state.clear()
     product_id = int(callback.data.replace("confirm_buy_", ""))
     user_id = callback.from_user.id
 
@@ -168,8 +190,8 @@ async def pay_with_balance(callback: CallbackQuery):
 
 
 @router.callback_query(F.data.startswith("pay_sbp_"))
-async def pay_with_sbp(callback: CallbackQuery):
-    """Оплата через СБП"""
+async def pay_with_sbp(callback: CallbackQuery, state: FSMContext):
+    """Оплата через СБП - запрос email"""
     product_id = int(callback.data.replace("pay_sbp_", ""))
 
     # Получаем информацию о товаре
@@ -179,6 +201,120 @@ async def pay_with_sbp(callback: CallbackQuery):
         return
 
     price = product[3]
+    product_name = product[1]
 
-    # Здесь будет интеграция с платежной системой
-    await callback.answer(f"Интеграция платежной системы будет добавлена позже.\nСумма: {price:.0f} ₽", show_alert=True)
+    # Сохраняем product_id в состояние
+    await state.update_data(sbp_product_id=product_id)
+    await state.set_state(PurchaseStates.waiting_for_email)
+
+    keyboard = [
+        [InlineKeyboardButton(text="❌ Отмена", callback_data=f"confirm_buy_{product_id}")]
+    ]
+
+    await callback.message.edit_caption(
+        caption=(
+            f"Оплата через СБП\n\n"
+            f"Товар: {product_name}\n"
+            f"Сумма: {price:.0f} ₽\n\n"
+            f"Для завершения покупки введите email вашего Supercell ID\n"
+            f"(это почта, на которую привязан аккаунт в игре)"
+        ),
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
+    )
+    await callback.answer()
+
+
+@router.message(PurchaseStates.waiting_for_email)
+async def process_sbp_email(message: Message, state: FSMContext):
+    """Обработка введённого email и создание платежа"""
+    email = message.text.strip().lower()
+
+    # Проверяем формат email
+    email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    if not re.match(email_pattern, email):
+        await message.answer(
+            "Некорректный формат email. Пожалуйста, введите корректный email:\n"
+            "(например: example@gmail.com)"
+        )
+        return
+
+    # Получаем сохранённый product_id
+    data = await state.get_data()
+    product_id = data.get('sbp_product_id')
+
+    if not product_id:
+        await state.clear()
+        await message.answer("Произошла ошибка. Пожалуйста, начните покупку заново.")
+        return
+
+    # Получаем товар
+    product = await get_product_by_id(product_id)
+    if not product:
+        await state.clear()
+        await message.answer("Товар не найден. Пожалуйста, начните покупку заново.")
+        return
+
+    product_name = product[1]
+    price = product[3]
+    user_id = message.from_user.id
+
+    # Создаём заказ без списания баланса
+    success, msg, order_id, pickup_code = await create_order_without_balance(
+        user_id, product_id, email
+    )
+
+    if not success:
+        await state.clear()
+        await message.answer(f"Ошибка создания заказа: {msg}")
+        return
+
+    # Устанавливаем статус "ожидает оплаты"
+    await update_order_payment_status(order_id, "pending_payment")
+
+    # Создаём ссылку на оплату через wata.pro
+    try:
+        result = await create_payment_form_url_async(
+            amount=price,
+            order_id=f"order_{order_id}",
+            description=f"Заказ #{order_id}: {product_name}"
+        )
+
+        if not result.success:
+            logger.error(f"Failed to create payment URL: {result.error}")
+            await message.answer(
+                f"Ошибка создания платежа: {result.error}\n\n"
+                f"Заказ #{order_id} создан, но требуется оплата.\n"
+                f"Попробуйте позже или обратитесь в поддержку."
+            )
+            await state.clear()
+            return
+
+        # Очищаем состояние
+        await state.clear()
+
+        # Отправляем кнопку для оплаты
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💳 Оплатить", url=result.payment_url)],
+            [InlineKeyboardButton(text="📞 Поддержка", url=SUPPORT_URL)]
+        ])
+
+        await message.answer(
+            f"Заказ #{order_id} создан!\n\n"
+            f"Товар: {product_name}\n"
+            f"Сумма к оплате: {price:.0f} ₽\n"
+            f"Supercell ID: {email}\n\n"
+            f"Нажмите кнопку «Оплатить» для перехода к оплате.\n"
+            f"После оплаты вы получите уведомление с кодом получения.",
+            reply_markup=keyboard
+        )
+
+        logger.info(f"SBP payment created for order {order_id}, user {user_id}, product {product_id}")
+
+    except Exception as e:
+        logger.error(f"Error creating SBP payment: {e}", exc_info=True)
+        await state.clear()
+        await message.answer(
+            f"Произошла ошибка при создании платежа.\n\n"
+            f"Заказ #{order_id} создан.\n"
+            f"Пожалуйста, обратитесь в поддержку для завершения оплаты."
+        )
