@@ -1,3 +1,5 @@
+https://www.supercellshop.xyz/
+
 💎 Telegram Gems Store (Mini App + Ticket System)
 A professional e-commerce solution for selling in-game currency, featuring a modern Telegram Mini App (TWA) interface and automated order processing.
 
