@@ -26,6 +26,8 @@ import fcntl
 
 ENABLE_PAYMENT_CHECKER = os.getenv("ENABLE_PAYMENT_CHECKER", "false").lower() == "true"
 ENABLE_DEBUG_ENDPOINTS = os.getenv("ENABLE_DEBUG_ENDPOINTS", "false").lower() == "true"
+ENABLE_PAYMENT_CHECKER_AUTO_CONFIRM = os.getenv("ENABLE_PAYMENT_CHECKER_AUTO_CONFIRM", "false").lower() == "true"
+ENABLE_PAYMENT_CHECKER_NOTIFY = os.getenv("ENABLE_PAYMENT_CHECKER_NOTIFY", "false").lower() == "true"
 
 # Production режим - определяем по окружению
 IS_PRODUCTION = os.getenv("PRODUCTION", "false").lower() == "true"
@@ -166,9 +168,22 @@ async def check_pending_payments_task():
                             wata_status = (status_data.get("status") or "").lower()
 
                             if wata_status == "paid":
+                                if not ENABLE_PAYMENT_CHECKER_AUTO_CONFIRM:
+                                    logger.warning(
+                                        f"Checker detected paid transaction for order {order_id}, "
+                                        "but auto-confirm is disabled"
+                                    )
+                                    continue
+
                                 # Обновляем статус заказа
                                 await update_order_payment_status(order_id, "paid")
                                 logger.info(f"Order {order_id} marked as paid via checker")
+
+                                if not ENABLE_PAYMENT_CHECKER_NOTIFY:
+                                    logger.info(
+                                        f"Checker notifications are disabled for order {order_id}"
+                                    )
+                                    continue
 
                                 # Получаем заказ и отправляем уведомления
                                 order_data = await get_order_by_id(order_id)
@@ -235,6 +250,11 @@ async def lifespan(app: FastAPI):
             return
 
         logger.warning("⚠️ Payment checker ENABLED")
+        logger.warning(
+            "⚠️ Checker flags: auto_confirm=%s, notify=%s",
+            ENABLE_PAYMENT_CHECKER_AUTO_CONFIRM,
+            ENABLE_PAYMENT_CHECKER_NOTIFY
+        )
         task = asyncio.create_task(check_pending_payments_task())
 
         yield
