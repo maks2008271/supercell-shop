@@ -8,6 +8,10 @@ User=www-data
 Group=www-data
 WorkingDirectory=/var/www/supercell-shop/superbot/miniapp
 Environment=PATH=/var/www/supercell-shop/venv/bin
+Environment=ENABLE_PAYMENT_CHECKER=false
+Environment=PAYMENT_CHECKER_MODE=off
+Environment=ENABLE_PAYMENT_CHECKER_AUTO_CONFIRM=false
+Environment=ENABLE_PAYMENT_CHECKER_NOTIFY=false
 EnvironmentFile=-/var/www/supercell-shop/superbot/.env
 ExecStart=/var/www/supercell-shop/venv/bin/gunicorn api:app -w 4 -k uvicorn.workers.UvicornWorker -b 127.0.0.1:8000
 Restart=always

@@ -28,6 +28,27 @@ ENABLE_PAYMENT_CHECKER = os.getenv("ENABLE_PAYMENT_CHECKER", "false").lower() ==
 ENABLE_DEBUG_ENDPOINTS = os.getenv("ENABLE_DEBUG_ENDPOINTS", "false").lower() == "true"
 ENABLE_PAYMENT_CHECKER_AUTO_CONFIRM = os.getenv("ENABLE_PAYMENT_CHECKER_AUTO_CONFIRM", "false").lower() == "true"
 ENABLE_PAYMENT_CHECKER_NOTIFY = os.getenv("ENABLE_PAYMENT_CHECKER_NOTIFY", "false").lower() == "true"
+PAYMENT_CHECKER_MODE_ENV = os.getenv("PAYMENT_CHECKER_MODE", "").strip().lower()
+
+# Режимы checker:
+# - off: checker полностью выключен
+# - monitor: только проверка/логирование, без изменений статусов и без уведомлений
+# - sync: обновляет статусы в БД, но без отправки сообщений
+# - sync_notify: обновляет статусы + отправляет уведомления
+_valid_checker_modes = {"off", "monitor", "sync", "sync_notify"}
+INVALID_PAYMENT_CHECKER_MODE = bool(
+    ENABLE_PAYMENT_CHECKER and PAYMENT_CHECKER_MODE_ENV and PAYMENT_CHECKER_MODE_ENV not in _valid_checker_modes
+)
+if ENABLE_PAYMENT_CHECKER:
+    if PAYMENT_CHECKER_MODE_ENV in _valid_checker_modes:
+        PAYMENT_CHECKER_MODE = PAYMENT_CHECKER_MODE_ENV
+    else:
+        PAYMENT_CHECKER_MODE = "monitor"
+else:
+    PAYMENT_CHECKER_MODE = "off"
+
+CHECKER_MUTATES_STATUS = PAYMENT_CHECKER_MODE in ("sync", "sync_notify")
+CHECKER_SENDS_NOTIFICATIONS = PAYMENT_CHECKER_MODE == "sync_notify"
 
 # Production режим - определяем по окружению
 IS_PRODUCTION = os.getenv("PRODUCTION", "false").lower() == "true"
@@ -49,6 +70,20 @@ logging.basicConfig(
     handlers=log_handlers
 )
 logger = logging.getLogger(__name__)
+
+if INVALID_PAYMENT_CHECKER_MODE:
+    logger.warning(
+        "Unknown PAYMENT_CHECKER_MODE=%s, fallback to monitor",
+        PAYMENT_CHECKER_MODE_ENV
+    )
+
+if ENABLE_PAYMENT_CHECKER and not PAYMENT_CHECKER_MODE_ENV and (
+    ENABLE_PAYMENT_CHECKER_AUTO_CONFIRM or ENABLE_PAYMENT_CHECKER_NOTIFY
+):
+    logger.warning(
+        "Legacy checker flags are ignored without PAYMENT_CHECKER_MODE. "
+        "Using monitor mode for safety."
+    )
 
 # Добавляем родительскую директорию в путь для импорта database
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -146,6 +181,11 @@ async def check_pending_payments_task():
     client = WataPaymentClient()
 
     while payment_checker_running:
+        paid_detected = 0
+        declined_detected = 0
+        paid_synced = 0
+        declined_synced = 0
+
         try:
             # Получаем список незавершённых платежей из базы
             pending = await get_pending_payments()
@@ -168,21 +208,16 @@ async def check_pending_payments_task():
                             wata_status = (status_data.get("status") or "").lower()
 
                             if wata_status == "paid":
-                                if not ENABLE_PAYMENT_CHECKER_AUTO_CONFIRM:
-                                    logger.warning(
-                                        f"Checker detected paid transaction for order {order_id}, "
-                                        "but auto-confirm is disabled"
-                                    )
+                                if not CHECKER_MUTATES_STATUS:
+                                    paid_detected += 1
                                     continue
 
                                 # Обновляем статус заказа
                                 await update_order_payment_status(order_id, "paid")
                                 logger.info(f"Order {order_id} marked as paid via checker")
+                                paid_synced += 1
 
-                                if not ENABLE_PAYMENT_CHECKER_NOTIFY:
-                                    logger.info(
-                                        f"Checker notifications are disabled for order {order_id}"
-                                    )
+                                if not CHECKER_SENDS_NOTIFICATIONS:
                                     continue
 
                                 # Получаем заказ и отправляем уведомления
@@ -224,14 +259,32 @@ async def check_pending_payments_task():
                                         })
 
                             elif wata_status in ("declined", "failed", "error"):
+                                if not CHECKER_MUTATES_STATUS:
+                                    declined_detected += 1
+                                    continue
+
                                 await update_order_payment_status(order_id, "payment_failed")
                                 logger.info(f"Order {order_id} payment declined via checker")
+                                declined_synced += 1
 
                     except Exception as e:
                         logger.error(f"Error checking order {order_id}: {e}")
 
         except Exception as e:
             logger.error(f"Payment checker error: {e}", exc_info=True)
+        finally:
+            if paid_detected or declined_detected:
+                logger.warning(
+                    "Checker monitor mode: detected paid=%s declined=%s, no status changes applied",
+                    paid_detected,
+                    declined_detected
+                )
+            if paid_synced or declined_synced:
+                logger.info(
+                    "Checker sync applied: paid=%s declined=%s",
+                    paid_synced,
+                    declined_synced
+                )
 
         # Ждём 60 секунд до следующей проверки
         await asyncio.sleep(60)
@@ -242,7 +295,7 @@ async def check_pending_payments_task():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global payment_checker_lock_fd
-    if ENABLE_PAYMENT_CHECKER:
+    if PAYMENT_CHECKER_MODE != "off":
         payment_checker_lock_fd = acquire_payment_checker_lock()
         if payment_checker_lock_fd is None:
             logger.warning("Payment checker already running in another worker; skipping in this worker")
@@ -251,9 +304,10 @@ async def lifespan(app: FastAPI):
 
         logger.warning("⚠️ Payment checker ENABLED")
         logger.warning(
-            "⚠️ Checker flags: auto_confirm=%s, notify=%s",
-            ENABLE_PAYMENT_CHECKER_AUTO_CONFIRM,
-            ENABLE_PAYMENT_CHECKER_NOTIFY
+            "⚠️ Checker mode: %s (mutates=%s, notifies=%s)",
+            PAYMENT_CHECKER_MODE,
+            CHECKER_MUTATES_STATUS,
+            CHECKER_SENDS_NOTIFICATIONS
         )
         task = asyncio.create_task(check_pending_payments_task())
 
@@ -269,7 +323,7 @@ async def lifespan(app: FastAPI):
         release_payment_checker_lock(payment_checker_lock_fd)
         payment_checker_lock_fd = None
     else:
-        logger.info("Payment checker disabled (ENABLE_PAYMENT_CHECKER=false)")
+        logger.info("Payment checker disabled (mode=off)")
         yield
 
 
