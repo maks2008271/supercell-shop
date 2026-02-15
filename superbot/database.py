@@ -1128,6 +1128,24 @@ async def update_order_payment_status(order_id: int, status: str):
             old_status = await cursor.fetchone()
             logger.info(f"[UPDATE_STATUS] Order {order_id}: OLD status = {old_status}")
 
+            current_status = old_status[0] if old_status else None
+
+            # Не даем откатывать уже оплаченный/выполненный заказ назад.
+            if current_status in ("paid", "completed") and status in ("pending_payment", "payment_failed"):
+                logger.warning(
+                    f"[UPDATE_STATUS] Skip downgrade for order {order_id}: "
+                    f"{current_status} -> {status}"
+                )
+                return
+
+            # Отмененный заказ оставляем отмененным.
+            if current_status == "cancelled" and status != "cancelled":
+                logger.warning(
+                    f"[UPDATE_STATUS] Skip status change for cancelled order {order_id}: "
+                    f"{current_status} -> {status}"
+                )
+                return
+
             # Обновляем
             await db.execute("""
                 UPDATE orders
