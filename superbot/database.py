@@ -1080,7 +1080,12 @@ async def save_payment_transaction(order_id: int, transaction_id: str):
     async with get_db() as db:
         await db.execute("""
             UPDATE orders
-            SET transaction_id = ?, status = 'pending_payment'
+            SET
+                transaction_id = ?,
+                status = CASE
+                    WHEN status IN ('paid', 'completed', 'cancelled') THEN status
+                    ELSE 'pending_payment'
+                END
             WHERE id = ?
         """, (transaction_id, order_id))
         await db.commit()

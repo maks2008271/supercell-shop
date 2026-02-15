@@ -11,6 +11,8 @@ router = Router()
 
 # Количество заказов на странице
 ORDERS_PER_PAGE = 5
+TODO_STATUSES = {"paid", "pending"}
+UNPAID_STATUSES = {"pending_payment"}
 
 
 def is_admin(user_id: int) -> bool:
@@ -36,9 +38,9 @@ async def show_orders_menu(callback: CallbackQuery):
         await callback.answer()
         return
 
-    # Разделяем по статусу оплаты
-    paid_orders = [o for o in orders if o[6] in ("paid", "pending")]
-    unpaid_orders = [o for o in orders if o[6] == "pending_payment"]
+    # Разделяем по статусам
+    todo_orders = [o for o in orders if o[6] in TODO_STATUSES]
+    unpaid_orders = [o for o in orders if o[6] in UNPAID_STATUSES]
 
     # Разделяем оплаченные по играм
     # order: (id, user_id, product_name, amount, pickup_code, created_at, status)
@@ -48,7 +50,7 @@ async def show_orders_menu(callback: CallbackQuery):
     clans_paid = []
     other_paid = []
 
-    for o in paid_orders:
+    for o in todo_orders:
         product_name = (o[2] or "").lower()
         if "brawl" in product_name or "бравл" in product_name:
             brawl_paid.append(o)
@@ -60,18 +62,18 @@ async def show_orders_menu(callback: CallbackQuery):
             other_paid.append(o)
 
     # Суммы
-    paid_sum = sum(o[3] for o in paid_orders)
+    todo_sum = sum(o[3] for o in todo_orders)
     brawl_sum = sum(o[3] for o in brawl_paid)
     royale_sum = sum(o[3] for o in royale_paid)
     clans_sum = sum(o[3] for o in clans_paid)
 
     keyboard = []
 
-    # Кнопка "Все оплаченные"
-    if paid_orders:
+    # Кнопка "К выполнению"
+    if todo_orders:
         keyboard.append([InlineKeyboardButton(
-            text=f"✅ ВСЕ ОПЛАЧЕННЫЕ ({len(paid_orders)}) — {paid_sum:.0f}₽",
-            callback_data="orders_paid_0"
+            text=f"🛠 К ВЫПОЛНЕНИЮ ({len(todo_orders)}) — {todo_sum:.0f}₽",
+            callback_data="orders_todo_0"
         )])
 
     # Кнопки по играм (только если есть заказы)
@@ -113,7 +115,7 @@ async def show_orders_menu(callback: CallbackQuery):
     text = (
         f"📋 Заказы\n\n"
         f"Всего незакрытых: {len(orders)}\n\n"
-        f"✅ <b>ОПЛАЧЕНО — готово к выдаче:</b> {len(paid_orders)}\n"
+        f"🛠 <b>К ВЫПОЛНЕНИЮ:</b> {len(todo_orders)}\n"
     )
 
     if brawl_paid:
@@ -146,7 +148,7 @@ async def show_game_orders(callback: CallbackQuery):
     page = int(parts[3])
 
     orders = await get_pending_orders()
-    paid_orders = [o for o in orders if o[6] in ("paid", "pending")]
+    todo_orders = [o for o in orders if o[6] in TODO_STATUSES]
 
     # Фильтруем по игре
     game_names = {
@@ -164,9 +166,9 @@ async def show_game_orders(callback: CallbackQuery):
         for g, (_, kw) in game_names.items():
             if g != "other":
                 all_keywords.extend(kw)
-        filtered = [o for o in paid_orders if not any(kw in (o[2] or "").lower() for kw in all_keywords)]
+        filtered = [o for o in todo_orders if not any(kw in (o[2] or "").lower() for kw in all_keywords)]
     else:
-        filtered = [o for o in paid_orders if any(kw in (o[2] or "").lower() for kw in keywords)]
+        filtered = [o for o in todo_orders if any(kw in (o[2] or "").lower() for kw in keywords)]
 
     if not filtered:
         keyboard = [[InlineKeyboardButton(text="« Назад", callback_data="admin_orders")]]
@@ -186,7 +188,7 @@ async def show_game_orders(callback: CallbackQuery):
     keyboard = []
     for order in page_orders:
         order_id, user_id, product_name, amount, pickup_code, created_at, status = order
-        status_icon = "💰" if status == "paid" else "📦"
+        status_icon = "💰" if status == "paid" else "🛠"
         # Укорачиваем название
         short_name = product_name[:25] if product_name else "Товар"
         keyboard.append([InlineKeyboardButton(
@@ -212,7 +214,7 @@ async def show_game_orders(callback: CallbackQuery):
 
     text = (
         f"{game_title}\n"
-        f"<b>Готовы к выдаче!</b>\n\n"
+        f"<b>К выполнению</b>\n\n"
         f"Всего: {len(filtered)} на сумму {total_sum:.0f}₽\n"
         f"На странице: {len(page_orders)} на {page_sum:.0f}₽"
     )
@@ -225,51 +227,55 @@ async def show_game_orders(callback: CallbackQuery):
     await callback.answer()
 
 
+@router.callback_query(F.data.startswith("orders_todo_"))
 @router.callback_query(F.data.startswith("orders_paid_"))
-async def show_paid_orders(callback: CallbackQuery):
-    """Показать все оплаченные заказы с пагинацией"""
+async def show_todo_orders(callback: CallbackQuery):
+    """Показать заказы к выполнению с пагинацией"""
     if not is_admin(callback.from_user.id):
         await callback.answer("У вас нет доступа", show_alert=True)
         return
 
-    page = int(callback.data.replace("orders_paid_", ""))
+    if callback.data.startswith("orders_paid_"):
+        page = int(callback.data.replace("orders_paid_", ""))
+    else:
+        page = int(callback.data.replace("orders_todo_", ""))
     orders = await get_pending_orders()
 
-    # Фильтруем только оплаченные
-    paid_orders = [o for o in orders if o[6] in ("paid", "pending")]
+    # Фильтруем только "к выполнению"
+    todo_orders = [o for o in orders if o[6] in TODO_STATUSES]
 
-    if not paid_orders:
+    if not todo_orders:
         keyboard = [[InlineKeyboardButton(text="« Назад", callback_data="admin_orders")]]
         await callback.message.edit_text(
-            "✅ Оплаченные заказы\n\nНет оплаченных заказов",
+            "🛠 К выполнению\n\nНет заказов к выполнению",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
         )
         await callback.answer()
         return
 
     # Пагинация
-    total_pages = (len(paid_orders) + ORDERS_PER_PAGE - 1) // ORDERS_PER_PAGE
+    total_pages = (len(todo_orders) + ORDERS_PER_PAGE - 1) // ORDERS_PER_PAGE
     start_idx = page * ORDERS_PER_PAGE
     end_idx = start_idx + ORDERS_PER_PAGE
-    page_orders = paid_orders[start_idx:end_idx]
+    page_orders = todo_orders[start_idx:end_idx]
 
     keyboard = []
     for order in page_orders:
         order_id, user_id, product_name, amount, pickup_code, created_at, status = order
-        status_icon = "💰" if status == "paid" else "📦"
+        status_icon = "💰" if status == "paid" else "🛠"
         short_name = product_name[:20] if product_name else "Товар"
         keyboard.append([InlineKeyboardButton(
             text=f"{status_icon} #{order_id} | {amount:.0f}₽ | {short_name}",
-            callback_data=f"vieword_paid_{order_id}"
+            callback_data=f"vieword_todo_{order_id}"
         )])
 
     # Навигация по страницам
     nav_row = []
     if page > 0:
-        nav_row.append(InlineKeyboardButton(text="◀️", callback_data=f"orders_paid_{page - 1}"))
+        nav_row.append(InlineKeyboardButton(text="◀️", callback_data=f"orders_todo_{page - 1}"))
     nav_row.append(InlineKeyboardButton(text=f"{page + 1}/{total_pages}", callback_data="noop"))
     if page < total_pages - 1:
-        nav_row.append(InlineKeyboardButton(text="▶️", callback_data=f"orders_paid_{page + 1}"))
+        nav_row.append(InlineKeyboardButton(text="▶️", callback_data=f"orders_todo_{page + 1}"))
 
     if nav_row:
         keyboard.append(nav_row)
@@ -278,12 +284,11 @@ async def show_paid_orders(callback: CallbackQuery):
 
     # Сумма на странице
     page_sum = sum(o[3] for o in page_orders)
-    total_sum = sum(o[3] for o in paid_orders)
+    total_sum = sum(o[3] for o in todo_orders)
 
     text = (
-        f"✅ <b>ВСЕ ОПЛАЧЕННЫЕ ЗАКАЗЫ</b>\n"
-        f"Готовы к выдаче!\n\n"
-        f"Всего: {len(paid_orders)} на сумму {total_sum:.0f}₽\n"
+        f"🛠 <b>ЗАКАЗЫ К ВЫПОЛНЕНИЮ</b>\n\n"
+        f"Всего: {len(todo_orders)} на сумму {total_sum:.0f}₽\n"
         f"На странице: {len(page_orders)} на {page_sum:.0f}₽"
     )
 
@@ -306,7 +311,7 @@ async def show_unpaid_orders(callback: CallbackQuery):
     orders = await get_pending_orders()
 
     # Фильтруем только неоплаченные
-    unpaid_orders = [o for o in orders if o[6] == "pending_payment"]
+    unpaid_orders = [o for o in orders if o[6] in UNPAID_STATUSES]
 
     if not unpaid_orders:
         keyboard = [[InlineKeyboardButton(text="« Назад", callback_data="admin_orders")]]
@@ -372,7 +377,7 @@ async def view_order_details(callback: CallbackQuery):
         await callback.answer("У вас нет доступа", show_alert=True)
         return
 
-    # vieword_paid_123 или vieword_unpaid_123 или vieword_game_brawl_123
+    # vieword_todo_123 или vieword_unpaid_123 или vieword_game_brawl_123
     parts = callback.data.split("_")
 
     if parts[1] == "game":
@@ -416,9 +421,12 @@ async def view_order_details(callback: CallbackQuery):
     elif status == "paid":
         status_text = "💰 ОПЛАЧЕН (СБП)"
         status_hint = "✅ Готов к выдаче!"
+    elif status == "pending":
+        status_text = "🛠 К ВЫПОЛНЕНИЮ"
+        status_hint = "Оплачен/создан без СБП, нужно выполнить заказ"
     else:
-        status_text = "📦 ОПЛАЧЕН (баланс)"
-        status_hint = "✅ Готов к выдаче!"
+        status_text = f"ℹ️ СТАТУС: {status}"
+        status_hint = "Проверьте заказ вручную"
 
     text = (
         f"{'='*24}\n"
@@ -474,7 +482,7 @@ async def view_order_details_legacy(callback: CallbackQuery):
         return
 
     status = order[7]
-    category = "unpaid" if status == "pending_payment" else "paid"
+    category = "unpaid" if status == "pending_payment" else "todo"
 
     # Перенаправляем на новый формат
     callback.data = f"vieword_{category}_{order_id}"
@@ -610,7 +618,7 @@ async def ask_confirm_order(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("admin_confirm_order_"))
 async def ask_confirm_order_legacy(callback: CallbackQuery):
     order_id = int(callback.data.replace("admin_confirm_order_", ""))
-    callback.data = f"conford_paid_{order_id}"
+    callback.data = f"conford_todo_{order_id}"
     await ask_confirm_order(callback)
 
 
@@ -638,9 +646,9 @@ async def confirm_order_final(callback: CallbackQuery):
     if category.startswith("game_"):
         callback.data = f"orders_{category}_0"
         await show_game_orders(callback)
-    elif category == "paid":
-        callback.data = f"orders_paid_0"
-        await show_paid_orders(callback)
+    elif category in ("paid", "todo"):
+        callback.data = f"orders_todo_0"
+        await show_todo_orders(callback)
     else:
         callback.data = f"orders_unpaid_0"
         await show_unpaid_orders(callback)
@@ -650,7 +658,7 @@ async def confirm_order_final(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("confirm_yes_"))
 async def confirm_order_final_legacy(callback: CallbackQuery):
     order_id = int(callback.data.replace("confirm_yes_", ""))
-    callback.data = f"confyes_paid_{order_id}"
+    callback.data = f"confyes_todo_{order_id}"
     await confirm_order_final(callback)
 
 
@@ -687,7 +695,7 @@ async def ask_cancel_order(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("admin_cancel_order_"))
 async def ask_cancel_order_legacy(callback: CallbackQuery):
     order_id = int(callback.data.replace("admin_cancel_order_", ""))
-    callback.data = f"cancord_paid_{order_id}"
+    callback.data = f"cancord_todo_{order_id}"
     await ask_cancel_order(callback)
 
 
@@ -718,9 +726,9 @@ async def cancel_order_final(callback: CallbackQuery):
     if category.startswith("game_"):
         callback.data = f"orders_{category}_0"
         await show_game_orders(callback)
-    elif category == "paid":
-        callback.data = f"orders_paid_0"
-        await show_paid_orders(callback)
+    elif category in ("paid", "todo"):
+        callback.data = f"orders_todo_0"
+        await show_todo_orders(callback)
     else:
         callback.data = f"orders_unpaid_0"
         await show_unpaid_orders(callback)
@@ -730,5 +738,5 @@ async def cancel_order_final(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("cancel_yes_"))
 async def cancel_order_final_legacy(callback: CallbackQuery):
     order_id = int(callback.data.replace("cancel_yes_", ""))
-    callback.data = f"cancyes_paid_{order_id}"
+    callback.data = f"cancyes_todo_{order_id}"
     await cancel_order_final(callback)
