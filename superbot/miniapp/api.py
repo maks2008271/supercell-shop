@@ -93,6 +93,7 @@ from database import (
     get_products_by_game_and_subcategory,
     get_product_by_id,
     create_order_without_balance,
+    create_order,
     get_all_products_admin,
     get_or_create_user,
     get_user_uid,
@@ -687,6 +688,26 @@ class PurchaseRequest(BaseModel):
         return v.lower()
 
 
+class CartItemRequest(BaseModel):
+    product_id: int = Field(..., gt=0, description="Product ID")
+    quantity: int = Field(1, ge=1, le=20, description="Quantity")
+
+
+class PurchaseCartRequest(BaseModel):
+    user_id: int = Field(..., gt=0, description="Telegram user ID")
+    supercell_id: str = Field(..., min_length=5, max_length=100, description="Supercell account email")
+    items: list[CartItemRequest] = Field(..., min_length=1, max_length=30, description="Cart items")
+
+    @field_validator('supercell_id')
+    @classmethod
+    def validate_email(cls, v: str) -> str:
+        email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+        v = v.strip()
+        if not re.match(email_pattern, v):
+            raise ValueError('Некорректный формат email')
+        return v.lower()
+
+
 # ===== ROUTES =====
 
 @app.get("/")
@@ -963,6 +984,92 @@ async def purchase_product(
         "order_id": order_id,
         "payment_required": True
         # pickup_code НЕ возвращаем - он будет отправлен после оплаты
+    }
+
+
+@app.post("/api/purchase-cart")
+async def purchase_cart(
+    request: PurchaseCartRequest,
+    x_telegram_init_data: str = Header(None, alias="X-Telegram-Init-Data")
+):
+    """Создать единый заказ по корзине (одна оплата на всю сумму)."""
+    if not x_telegram_init_data:
+        logger.warning("Cart purchase attempt without Telegram initData")
+        raise HTTPException(status_code=401, detail="Требуется авторизация через Telegram")
+
+    user_data = validate_telegram_init_data(x_telegram_init_data)
+    if not user_data:
+        logger.warning("Cart purchase attempt with invalid Telegram initData")
+        raise HTTPException(status_code=401, detail="Неверная авторизация Telegram")
+
+    telegram_user_id = user_data.get('id')
+    if telegram_user_id and telegram_user_id != request.user_id:
+        logger.warning(f"Cart purchase user mismatch: request={request.user_id}, telegram={telegram_user_id}")
+        raise HTTPException(status_code=403, detail="Несоответствие пользователя")
+
+    # Объединяем дубликаты по product_id
+    merged_items = {}
+    for item in request.items:
+        merged_items[item.product_id] = merged_items.get(item.product_id, 0) + item.quantity
+
+    product_rows = []
+    for product_id, qty in merged_items.items():
+        product = await get_product_by_id(product_id)
+        if not product:
+            raise HTTPException(status_code=404, detail=f"Товар #{product_id} не найден")
+        if not product[6]:
+            raise HTTPException(status_code=400, detail=f"Товар '{product[1]}' временно отсутствует")
+        product_rows.append((product, qty))
+
+    if not product_rows:
+        raise HTTPException(status_code=400, detail="Корзина пуста")
+
+    total_amount = 0.0
+    total_items = 0
+    games = set()
+    summary_parts = []
+
+    for product, qty in product_rows:
+        name = product[1]
+        price = float(product[3] or 0)
+        game = product[4] or ""
+        total_amount += price * qty
+        total_items += qty
+        if game:
+            games.add(game)
+        summary_parts.append(f"{name} x{qty}")
+
+    summary_preview = ", ".join(summary_parts[:4])
+    if len(summary_parts) > 4:
+        summary_preview += f" +{len(summary_parts) - 4} поз."
+    product_name = f"🛒 Корзина ({total_items} шт): {summary_preview}"
+
+    game_value = games.pop() if len(games) == 1 else "mixed"
+    order_id, _pickup_code = await create_order(
+        user_id=request.user_id,
+        product_id=None,
+        amount=round(total_amount, 2),
+        product_name=product_name,
+        game=game_value,
+        supercell_id=request.supercell_id
+    )
+
+    await update_order_payment_status(order_id, "pending_payment")
+    logger.info(
+        "Cart order created: order_id=%s user_id=%s items=%s total=%.2f",
+        order_id,
+        request.user_id,
+        total_items,
+        total_amount
+    )
+
+    return {
+        "success": True,
+        "message": "Заказ по корзине создан. Ожидает оплаты.",
+        "order_id": order_id,
+        "payment_required": True,
+        "total_amount": round(total_amount, 2),
+        "total_items": total_items
     }
 
 
@@ -1833,6 +1940,8 @@ async def wata_webhook(request: Request):
         status_normalized = "paid"
     elif status_normalized in ("failed", "rejected", "cancelled", "canceled", "error", "declined"):
         status_normalized = "declined"
+    elif status_normalized in ("created", "pending", "processing", "in_progress"):
+        status_normalized = "pending"
     logger.info(f"Normalized status: '{status}' -> '{status_normalized}'")
 
     # Извлекаем числовой order_id
@@ -1936,6 +2045,10 @@ async def wata_webhook(request: Request):
     elif status_normalized == "declined":
         logger.warning(f"Payment DECLINED for order {numeric_order_id}")
 
+        # Фиксируем transaction_id, чтобы в БД было видно, какой платёж отклонён.
+        if transaction_id:
+            await save_payment_transaction(numeric_order_id, transaction_id)
+
         # Обновляем статус заказа
         await update_order_payment_status(numeric_order_id, "payment_failed")
 
@@ -1952,7 +2065,9 @@ async def wata_webhook(request: Request):
 
     elif status_normalized == "pending":
         logger.info(f"Payment PENDING for order {numeric_order_id}")
-        # Ничего не делаем, ждём финального статуса
+        # Сохраняем transaction_id для отслеживания попытки оплаты.
+        if transaction_id:
+            await save_payment_transaction(numeric_order_id, transaction_id)
 
     else:
         logger.warning(f"Unknown payment status: {status}")

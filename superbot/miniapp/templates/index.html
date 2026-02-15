@@ -6,7 +6,7 @@
     <title>Supercell Shop</title>
     <link rel="icon" type="image/png" href="/static/images/main.png">
     <link rel="apple-touch-icon" href="/static/images/main.png">
-    <link rel="stylesheet" href="../static/css/style.css?v=30">
+    <link rel="stylesheet" href="../static/css/style.css?v=32">
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
 <body>
@@ -33,6 +33,12 @@
                         <path d="M21 21L15 15M17 10C17 13.866 13.866 17 10 17C6.13401 17 3 13.866 3 10C3 6.13401 6.13401 3 10 3C13.866 3 17 6.13401 17 10Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                     </svg>
                 </button>
+                <button class="nav-btn nav-cart-btn" id="cartBtn">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                        <path d="M3 3H5L5.4 5M7 13H17L21 5H5.4M7 13L4.707 15.293C4.077 15.923 4.523 17 5.414 17H17M17 17C15.895 17 15 17.895 15 19C15 20.105 15.895 21 17 21C18.105 21 19 20.105 19 19C19 17.895 18.105 17 17 17ZM9 19C9 20.105 8.105 21 7 21C5.895 21 5 20.105 5 19C5 17.895 5.895 17 7 17C8.105 17 9 17.895 9 19Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                    <span class="nav-cart-count" id="cartCount" style="display: none;">0</span>
+                </button>
                 <button class="nav-btn" id="profileBtn">
                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
                         <path d="M20 21V19C20 17.9391 19.5786 16.9217 18.8284 16.1716C18.0783 15.4214 17.0609 15 16 15H8C6.93913 15 5.92172 15.4214 5.17157 16.1716C4.42143 16.9217 4 17.9391 4 19V21M16 7C16 9.20914 14.2091 11 12 11C9.79086 11 8 9.20914 8 7C8 4.79086 9.79086 3 12 3C14.2091 3 16 4.79086 16 7Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -51,6 +57,29 @@
             </div>
             <div class="search-results" id="searchResults">
                 <!-- Результаты поиска будут здесь -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Модальное окно корзины -->
+    <div class="cart-modal-overlay" id="cartModal">
+        <div class="cart-modal">
+            <div class="cart-modal-header">
+                <h3>Корзина</h3>
+                <button class="cart-close-btn" id="cartClose">✕</button>
+            </div>
+            <div class="cart-items-list" id="cartItemsList">
+                <div class="orders-empty">Корзина пуста</div>
+            </div>
+            <div class="cart-footer">
+                <div class="cart-total-row">
+                    <span>Итого:</span>
+                    <span class="cart-total-price" id="cartTotalPrice">0₽</span>
+                </div>
+                <div class="cart-footer-actions">
+                    <button class="btn-cancel" id="cartClearBtn">Очистить</button>
+                    <button class="btn-continue" id="cartCheckoutBtn" disabled>Оформить всё</button>
+                </div>
             </div>
         </div>
     </div>
@@ -470,6 +499,6 @@
         </div>
     </div>
 
-    <script src="../static/js/app.js?v=29"></script>
+    <script src="../static/js/app.js?v=32"></script>
 </body>
 </html>
