@@ -11,7 +11,11 @@ Environment=PATH=/var/www/supercell-shop/venv/bin
 EnvironmentFile=-/var/www/supercell-shop/superbot/.env
 ExecStart=/var/www/supercell-shop/venv/bin/python main.py
 Restart=always
-RestartSec=10
+RestartSec=2
+KillSignal=SIGINT
+TimeoutStopSec=20
+KillMode=mixed
+SendSIGKILL=yes
 
 # Логирование
 StandardOutput=append:/var/log/supercell-shop/bot.log

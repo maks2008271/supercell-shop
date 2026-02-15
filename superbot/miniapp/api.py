@@ -1354,13 +1354,12 @@ async def simulate_payment(order_id: int, admin_key: str = None, status: str = "
     results = {"order_id": order_id, "simulated_status": status, "actions": []}
 
     if status_normalized == "paid":
-        # Обновляем статус заказа
-        await update_order_payment_status(order_id, "paid")
-        results["actions"].append("Order status updated to 'paid'")
-
-        # Сохраняем transaction_id
+        # Сохраняем transaction_id и финально фиксируем paid.
+        # Порядок важен: так не откатываемся в pending_payment.
         await save_payment_transaction(order_id, transaction_id)
         results["actions"].append(f"Transaction saved: {transaction_id}")
+        await update_order_payment_status(order_id, "paid")
+        results["actions"].append("Order status updated to 'paid'")
 
         # Уведомляем пользователя
         user_message = (
@@ -1794,7 +1793,11 @@ async def wata_webhook(request: Request):
     if status_normalized == "paid":
         logger.info(f"Payment CONFIRMED for order {numeric_order_id}")
 
-        # Обновляем статус заказа на "paid"
+        # Сначала сохраняем transaction_id (если есть), затем финально ставим paid.
+        if transaction_id:
+            await save_payment_transaction(numeric_order_id, transaction_id)
+
+        # Обновляем статус заказа на "paid" последней операцией
         try:
             await update_order_payment_status(numeric_order_id, "paid")
             logger.info(f"Order {numeric_order_id} status updated to 'paid' successfully")
@@ -1808,10 +1811,6 @@ async def wata_webhook(request: Request):
             logger.info(f"Order {numeric_order_id} actual status after update: '{actual_status}'")
             if actual_status != "paid":
                 logger.error(f"ORDER STATUS MISMATCH! Expected 'paid', got '{actual_status}'")
-
-        # Сохраняем transaction_id если есть
-        if transaction_id:
-            await save_payment_transaction(numeric_order_id, transaction_id)
 
         # Уведомляем пользователя об успешной оплате
         try:
