@@ -1431,21 +1431,14 @@ function displayCategoryProducts(products) {
             imageHtml = '<span class="placeholder-icon">💎</span>';
         }
 
-        const description = product.description || 'Нет описания';
         return `
             <div class="product-card ripple" data-game="${currentGame}" style="animation-delay: ${index * 0.05}s">
                 <div class="product-image">
                     ${imageHtml}
                     <span class="product-price-badge">${formatPrice(product.price)}₽</span>
                 </div>
-                <div class="product-header" onclick="toggleProductDescription(this)">
+                <div class="product-header">
                     <span class="product-name">${product.name}</span>
-                    <svg class="product-expand-icon" width="20" height="20" viewBox="0 0 24 24" fill="none">
-                        <path d="M6 9L12 15L18 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                    </svg>
-                </div>
-                <div class="product-description-block" style="display: none;">
-                    <p>${description}</p>
                 </div>
                 <div class="product-footer">
                     <span class="product-price">${formatPrice(product.price)} <span class="product-price-currency">₽</span></span>
@@ -1469,22 +1462,6 @@ function displayCategoryProducts(products) {
 function handleCategoryProductClick(index) {
     if (currentCategoryProducts[index]) {
         openProductModal(currentCategoryProducts[index]);
-    }
-}
-
-function toggleProductDescription(headerElement) {
-    const card = headerElement.closest('.product-card');
-    const descBlock = card.querySelector('.product-description-block');
-    const expandIcon = headerElement.querySelector('.product-expand-icon');
-
-    if (descBlock.style.display === 'none') {
-        descBlock.style.display = 'block';
-        expandIcon.style.transform = 'rotate(180deg)';
-        card.classList.add('expanded');
-    } else {
-        descBlock.style.display = 'none';
-        expandIcon.style.transform = 'rotate(0deg)';
-        card.classList.remove('expanded');
     }
 }
 
@@ -1524,7 +1501,6 @@ function displayProducts(products, gridElement, countElement) {
             imageHtml = '<span class="placeholder-icon">💎</span>';
         }
 
-        const description = product.description || 'Нет описания';
         return `
             <div class="product-card ripple" data-game="${currentGame}" style="animation-delay: ${index * 0.05}s">
                 <div class="product-image">
@@ -1532,14 +1508,8 @@ function displayProducts(products, gridElement, countElement) {
                     <span class="product-price-badge">${formatPrice(product.price)}₽</span>
                     <span class="product-watermark">SUPERCELL SHOP</span>
                 </div>
-                <div class="product-header" onclick="toggleProductDescription(this)">
+                <div class="product-header">
                     <span class="product-name">${product.name}</span>
-                    <svg class="product-expand-icon" width="20" height="20" viewBox="0 0 24 24" fill="none">
-                        <path d="M6 9L12 15L18 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                    </svg>
-                </div>
-                <div class="product-description-block" style="display: none;">
-                    <p>${description}</p>
                 </div>
                 <div class="product-footer">
                     <span class="product-price">${formatPrice(product.price)} <span class="product-price-currency">₽</span></span>

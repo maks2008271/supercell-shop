@@ -1236,11 +1236,17 @@ async def create_sbp_payment(
     amount = order[4]
     product_name = order[3] or "Товар"
 
+    # Для корзины product_name может быть длинным, что ломает создание ссылки в wata.
+    # Ограничиваем description безопасной длиной.
+    payment_description = f"Заказ #{order_id}: {product_name}".strip()
+    if len(payment_description) > 96:
+        payment_description = f"Заказ #{order_id} Supercell Shop"
+
     # Генерируем ссылку на платёжную форму через API wata.pro
     result = await create_payment_form_url_async(
         amount=amount,
         order_id=f"order_{order_id}",
-        description=f"Заказ #{order_id}: {product_name}"
+        description=payment_description
     )
 
     if not result.success:

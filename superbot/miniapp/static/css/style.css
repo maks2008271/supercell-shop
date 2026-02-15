@@ -1018,11 +1018,10 @@ body {
 }
 
 .product-header {
-    padding: 10px 12px 6px;
+    padding: 10px 12px 8px;
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    cursor: pointer;
+    justify-content: flex-start;
 }
 
 .product-name {
@@ -1058,15 +1057,17 @@ body {
 .product-footer {
     padding: 6px 12px 12px;
     display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 10px;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
 }
 
 .product-price {
-    font-size: 15px;
+    font-size: 16px;
     font-weight: 700;
     color: #ffffff;
+    line-height: 1;
+    white-space: nowrap;
 }
 
 .product-price-currency {
@@ -1074,7 +1075,7 @@ body {
 }
 
 .product-buy-btn {
-    padding: 7px 14px;
+    padding: 8px 10px;
     background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
     border: none;
     border-radius: 8px;
@@ -1091,13 +1092,13 @@ body {
 }
 
 .product-actions {
-    display: flex;
-    align-items: center;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
     gap: 8px;
 }
 
 .product-cart-btn {
-    padding: 7px 12px;
+    padding: 8px 10px;
     background: rgba(255, 255, 255, 0.08);
     border: 1px solid rgba(255, 255, 255, 0.18);
     border-radius: 8px;
@@ -1107,6 +1108,11 @@ body {
     cursor: pointer;
     transition: all 0.3s ease;
     white-space: nowrap;
+}
+
+.product-buy-btn,
+.product-cart-btn {
+    width: 100%;
 }
 
 .product-cart-btn:hover {
@@ -2568,8 +2574,10 @@ body {
 }
 
 .products-grid.list-view .product-footer {
-    padding: 0;
+    padding: 0 0 0 10px;
     flex-shrink: 0;
+    flex-direction: row;
+    align-items: center;
     gap: 10px;
     order: 3;
 }
@@ -2581,22 +2589,25 @@ body {
 .products-grid.list-view .product-footer .product-buy-btn {
     padding: 8px 16px;
     font-size: 13px;
+    width: auto;
 }
 
 .products-grid.list-view .product-footer .product-cart-btn {
     padding: 8px 14px;
     font-size: 13px;
+    width: auto;
+}
+
+.products-grid.list-view .product-footer .product-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
 }
 
 /* ===== RESPONSIVE ===== */
 @media (max-width: 560px) {
-    .product-footer {
-        align-items: flex-end;
-    }
-
-    .product-actions {
-        width: 100%;
-        justify-content: flex-end;
+    .product-price {
+        font-size: 15px;
     }
 
     .cart-item {
