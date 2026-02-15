@@ -20,19 +20,23 @@ from miniapp.wata_payment import WataPaymentClient
 # Получаем путь к директории, где находится этот файл
 BASE_DIR = Path(__file__).parent
 
-# Настройка подробного логирования
+# Настройка логирования (production-friendly)
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+LOG_TO_FILE = os.getenv("BOT_LOG_TO_FILE", "false").lower() == "true"
+log_handlers = [logging.StreamHandler()]
+if LOG_TO_FILE:
+    log_handlers.append(logging.FileHandler('/tmp/bot_debug.log', encoding='utf-8'))
+
 logging.basicConfig(
-    level=logging.DEBUG,  # Включаем DEBUG уровень
+    level=getattr(logging, LOG_LEVEL, logging.INFO),
     format='%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s',
-    handlers=[
-        logging.StreamHandler(),  # Вывод в консоль
-        logging.FileHandler('/tmp/bot_debug.log', encoding='utf-8')  # Вывод в файл
-    ]
+    handlers=log_handlers
 )
 
-# Устанавливаем DEBUG уровень для aiogram
-logging.getLogger('aiogram').setLevel(logging.DEBUG)
-logging.getLogger('aiogram.event').setLevel(logging.DEBUG)
+# DEBUG для aiogram только в debug-режиме
+if LOG_LEVEL == "DEBUG":
+    logging.getLogger('aiogram').setLevel(logging.DEBUG)
+    logging.getLogger('aiogram.event').setLevel(logging.DEBUG)
 
 logger = logging.getLogger(__name__)
 

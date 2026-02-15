@@ -19,7 +19,8 @@ async def show_all_products(callback: CallbackQuery):
     else:
         text = "📦 <b>Доступные товары</b>\n\n"
         for product in products[:10]:  # Показываем первые 10 товаров
-            product_id, name, description, price, category, in_stock, image_url, created_at = product
+            # Формат products: id, name, description, price, game, subcategory, ...
+            _, name, description, price = product[:4]
             text += f"🔸 <b>{name}</b>\n"
             text += f"💰 Цена: {price:.2f} ₽\n"
             if description:
@@ -57,7 +58,7 @@ async def show_category_products(callback: CallbackQuery):
     else:
         text = f"<b>{category_name}</b>\n\n"
         for product in products:
-            product_id, name, description, price, cat, in_stock, image_url, created_at = product
+            _, name, description, price = product[:4]
             text += f"🔸 <b>{name}</b>\n"
             text += f"💰 Цена: {price:.2f} ₽\n"
             if description:

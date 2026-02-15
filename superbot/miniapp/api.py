@@ -22,23 +22,29 @@ import hashlib
 import hmac
 import asyncio
 from urllib.parse import parse_qsl, unquote
+import fcntl
 
 ENABLE_PAYMENT_CHECKER = os.getenv("ENABLE_PAYMENT_CHECKER", "false").lower() == "true"
+ENABLE_DEBUG_ENDPOINTS = os.getenv("ENABLE_DEBUG_ENDPOINTS", "false").lower() == "true"
 
 # Production режим - определяем по окружению
 IS_PRODUCTION = os.getenv("PRODUCTION", "false").lower() == "true"
+ADMIN_API_KEY = os.getenv("ADMIN_API_KEY", "").strip()
+API_LOG_TO_FILE = os.getenv("API_LOG_TO_FILE", "false").lower() == "true"
+PAYMENT_CHECKER_LOCK_PATH = os.getenv("PAYMENT_CHECKER_LOCK_PATH", "/tmp/supercell_payment_checker.lock")
 
 # Настройка логирования для production
 LOG_LEVEL = logging.INFO if IS_PRODUCTION else logging.DEBUG
 LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s'
 
+log_handlers = [logging.StreamHandler()]
+if API_LOG_TO_FILE:
+    log_handlers.append(logging.FileHandler('/tmp/api_debug.log', encoding='utf-8'))
+
 logging.basicConfig(
     level=LOG_LEVEL,
     format=LOG_FORMAT,
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler('/tmp/api_debug.log', encoding='utf-8')
-    ]
+    handlers=log_handlers
 )
 logger = logging.getLogger(__name__)
 
@@ -69,6 +75,57 @@ from config import BOT_TOKEN, ADMIN_IDS, SUPPORT_URL
 
 #Флаг для остановки фоновой задачи
 payment_checker_running = False
+payment_checker_lock_fd = None
+
+
+def _is_admin_key_valid(admin_key: str | None) -> bool:
+    if not admin_key:
+        return False
+    if ADMIN_API_KEY:
+        return hmac.compare_digest(admin_key, ADMIN_API_KEY)
+
+    # Fallback только для dev-режима, чтобы не ломать локальную отладку.
+    if not IS_PRODUCTION:
+        fallback_key = BOT_TOKEN[:10] if BOT_TOKEN else "test"
+        return hmac.compare_digest(admin_key, fallback_key)
+    return False
+
+
+def ensure_admin_access(admin_key: str | None):
+    if not _is_admin_key_valid(admin_key):
+        raise HTTPException(status_code=403, detail="Invalid admin key")
+
+
+def ensure_debug_access(admin_key: str | None):
+    if not ENABLE_DEBUG_ENDPOINTS:
+        raise HTTPException(status_code=404, detail="Not found")
+    ensure_admin_access(admin_key)
+
+
+def acquire_payment_checker_lock() -> int | None:
+    """Берем межпроцессный lock, чтобы checker запускался в одном worker."""
+    try:
+        fd = os.open(PAYMENT_CHECKER_LOCK_PATH, os.O_CREAT | os.O_RDWR, 0o644)
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return fd
+    except BlockingIOError:
+        return None
+    except Exception as e:
+        logger.error(f"Failed to acquire payment checker lock: {e}")
+        return None
+
+
+def release_payment_checker_lock(fd: int | None):
+    if fd is None:
+        return
+    try:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+    except Exception:
+        pass
+    try:
+        os.close(fd)
+    except Exception:
+        pass
 
 async def check_pending_payments_task():
     """
@@ -169,7 +226,14 @@ async def check_pending_payments_task():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global payment_checker_lock_fd
     if ENABLE_PAYMENT_CHECKER:
+        payment_checker_lock_fd = acquire_payment_checker_lock()
+        if payment_checker_lock_fd is None:
+            logger.warning("Payment checker already running in another worker; skipping in this worker")
+            yield
+            return
+
         logger.warning("⚠️ Payment checker ENABLED")
         task = asyncio.create_task(check_pending_payments_task())
 
@@ -182,9 +246,10 @@ async def lifespan(app: FastAPI):
             await task
         except asyncio.CancelledError:
             pass
+        release_payment_checker_lock(payment_checker_lock_fd)
+        payment_checker_lock_fd = None
     else:
-        logger.error("❌ PAYMENT CHECKER DISABLED — ENABLE_PAYMENT_CHECKER=false")
-        logger.error("❌ SBP / payment webhooks are OFF")
+        logger.info("Payment checker disabled (ENABLE_PAYMENT_CHECKER=false)")
         yield
 
 
@@ -848,11 +913,12 @@ MINIAPP_BASE_URL = os.getenv("WEBHOOK_BASE_URL", "https://supercellshop.xyz")
 
 
 @app.get("/api/wata-status")
-async def wata_status():
+async def wata_status(admin_key: str = None):
     """
     Диагностика конфигурации wata.pro.
     Проверяет наличие токена и настройки.
     """
+    ensure_debug_access(admin_key)
     token = WATA_API_TOKEN
     token_set = bool(token and token != "ВСТАВЬ_ТОКЕН_СЮДА" and len(token) > 20)
 
@@ -872,9 +938,7 @@ async def db_debug(admin_key: str = None):
     Диагностика базы данных.
     Показывает путь к БД и тестирует запись/чтение.
     """
-    expected_key = BOT_TOKEN[:10] if BOT_TOKEN else "test"
-    if admin_key != expected_key:
-        return {"error": "Invalid admin key"}
+    ensure_debug_access(admin_key)
 
     from config import DB_NAME
     from database import get_db
@@ -920,9 +984,7 @@ async def orders_debug(admin_key: str = None, limit: int = 50):
 
     GET /api/orders-debug?admin_key=YOUR_KEY&limit=50
     """
-    expected_key = BOT_TOKEN[:10] if BOT_TOKEN else "test"
-    if admin_key != expected_key:
-        return {"error": "Invalid admin key", "hint": "Use first 10 chars of BOT_TOKEN"}
+    ensure_debug_access(admin_key)
 
     from database import get_db
 
@@ -1260,13 +1322,7 @@ async def simulate_payment(order_id: int, admin_key: str = None, status: str = "
     status может быть: Paid, Declined, Pending
     admin_key = первые 10 символов BOT_TOKEN
     """
-    expected_key = BOT_TOKEN[:10] if BOT_TOKEN else "test"
-    if admin_key != expected_key:
-        return {
-            "error": "Invalid admin key",
-            "hint": "Use first 10 chars of BOT_TOKEN as admin_key",
-            "example": f"/api/simulate-payment/{order_id}?admin_key=YOUR_KEY&status=Paid"
-        }
+    ensure_debug_access(admin_key)
 
     # Проверяем что заказ существует
     order = await get_order_by_id(order_id)
@@ -1378,12 +1434,7 @@ async def sync_payments_from_wata(admin_key: str = None):
 
     admin_key = первые 10 символов BOT_TOKEN
     """
-    expected_key = BOT_TOKEN[:10] if BOT_TOKEN else "test"
-    if admin_key != expected_key:
-        return {
-            "error": "Invalid admin key",
-            "hint": "Use first 10 chars of BOT_TOKEN as admin_key"
-        }
+    ensure_admin_access(admin_key)
 
     from wata_payment import WataPaymentClient
     client = WataPaymentClient()
@@ -1503,9 +1554,7 @@ async def mark_order_as_paid(order_id: int, admin_key: str = None):
 
     GET /api/mark-paid/123?admin_key=YOUR_KEY
     """
-    expected_key = BOT_TOKEN[:10] if BOT_TOKEN else "test"
-    if admin_key != expected_key:
-        return {"error": "Invalid admin key"}
+    ensure_admin_access(admin_key)
 
     order = await get_order_by_id(order_id)
     if not order:
@@ -1588,10 +1637,7 @@ async def test_notification(order_id: int, admin_key: str = None):
 
     ВНИМАНИЕ: Только для тестирования! Не меняет статус заказа.
     """
-    # Простая защита - требуем ключ
-    expected_key = BOT_TOKEN[:10] if BOT_TOKEN else "test"
-    if admin_key != expected_key:
-        return {"error": "Invalid admin key", "hint": "Use first 10 chars of BOT_TOKEN"}
+    ensure_debug_access(admin_key)
 
     order = await get_order_by_id(order_id)
     if not order:
@@ -1636,9 +1682,7 @@ async def get_debug_logs(admin_key: str = None, lines: int = 100):
     Просмотр последних логов API для диагностики.
     Требует admin_key (первые 10 символов BOT_TOKEN).
     """
-    expected_key = BOT_TOKEN[:10] if BOT_TOKEN else "test"
-    if admin_key != expected_key:
-        return {"error": "Invalid admin key"}
+    ensure_debug_access(admin_key)
 
     try:
         with open('/tmp/api_debug.log', 'r', encoding='utf-8') as f:

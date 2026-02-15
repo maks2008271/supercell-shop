@@ -4,8 +4,6 @@ from datetime import datetime
 import random
 import string
 import asyncio
-from functools import lru_cache
-from typing import Optional
 from contextlib import asynccontextmanager
 
 
@@ -16,6 +14,7 @@ async def get_db():
     try:
         await db.execute("PRAGMA busy_timeout=30000")  # 30 секунд таймаут
         await db.execute("PRAGMA journal_mode=WAL")
+        await db.execute("PRAGMA synchronous=NORMAL")
         yield db
     finally:
         await db.close()
@@ -166,6 +165,15 @@ async def init_db():
 
         if 'pickup_code' not in column_names:
             await db.execute("ALTER TABLE orders ADD COLUMN pickup_code TEXT")
+            await db.commit()
+
+        # Миграции для платежей и Mini App
+        if 'supercell_id' not in column_names:
+            await db.execute("ALTER TABLE orders ADD COLUMN supercell_id TEXT")
+            await db.commit()
+
+        if 'transaction_id' not in column_names:
+            await db.execute("ALTER TABLE orders ADD COLUMN transaction_id TEXT")
             await db.commit()
 
         # Миграция: добавляем image_path для поддержки статических изображений
@@ -364,11 +372,17 @@ async def get_user_orders_stats(user_id: int):
 
 
 async def get_all_products(category: str = None):
-    """Получить все товары или товары по категории"""
+    """Получить все товары или товары по legacy-категории."""
     async with get_db() as db:
         if category:
-            query = "SELECT * FROM products WHERE category = ? AND in_stock = 1"
-            async with db.execute(query, (category,)) as cursor:
+            # Legacy-режим: раньше использовалось поле category.
+            # Поддерживаем старые callback'и через game/subcategory.
+            query = """
+                SELECT * FROM products
+                WHERE in_stock = 1
+                  AND (game = ? OR subcategory = ?)
+            """
+            async with db.execute(query, (category, category)) as cursor:
                 return await cursor.fetchall()
         else:
             query = "SELECT * FROM products WHERE in_stock = 1"
@@ -387,16 +401,16 @@ async def add_sample_products():
 
         # Добавляем примеры товаров
         products = [
-            ("💎 Донат 100 руб", "Донат на сумму 100 рублей", 100, "donate"),
-            ("💎 Донат 500 руб", "Донат на сумму 500 рублей", 500, "donate"),
-            ("💎 Донат 1000 руб", "Донат на сумму 1000 рублей", 1000, "donate"),
-            ("🎮 Игровая валюта 100", "100 единиц игровой валюты", 50, "currency"),
-            ("🎮 Игровая валюта 500", "500 единиц игровой валюты", 200, "currency"),
-            ("🎁 Подарок #1", "Специальный подарок", 150, "gifts"),
+            ("💎 Донат 100 руб", "Донат на сумму 100 рублей", 100, "legacy", "donate"),
+            ("💎 Донат 500 руб", "Донат на сумму 500 рублей", 500, "legacy", "donate"),
+            ("💎 Донат 1000 руб", "Донат на сумму 1000 рублей", 1000, "legacy", "donate"),
+            ("🎮 Игровая валюта 100", "100 единиц игровой валюты", 50, "legacy", "currency"),
+            ("🎮 Игровая валюта 500", "500 единиц игровой валюты", 200, "legacy", "currency"),
+            ("🎁 Подарок #1", "Специальный подарок", 150, "legacy", "gifts"),
         ]
 
         await db.executemany(
-            "INSERT INTO products (name, description, price, category) VALUES (?, ?, ?, ?)",
+            "INSERT INTO products (name, description, price, game, subcategory) VALUES (?, ?, ?, ?, ?)",
             products
         )
         await db.commit()
@@ -1152,4 +1166,3 @@ async def get_order_by_transaction_id(transaction_id: str):
                 "supercell_id": row[7]
             }
         return None
-

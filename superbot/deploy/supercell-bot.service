@@ -6,9 +6,10 @@ After=network.target
 Type=simple
 User=www-data
 Group=www-data
-WorkingDirectory=/var/www/supercell-shop
+WorkingDirectory=/var/www/supercell-shop/superbot
 Environment=PATH=/var/www/supercell-shop/venv/bin
-ExecStart=/var/www/supercell-shop/venv/bin/python bot.py
+EnvironmentFile=-/var/www/supercell-shop/superbot/.env
+ExecStart=/var/www/supercell-shop/venv/bin/python main.py
 Restart=always
 RestartSec=10
 
